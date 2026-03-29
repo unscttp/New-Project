@@ -1,0 +1,164 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f1ea;
+  --panel: #fffdf8;
+  --line: #d8d0c2;
+  --text: #2c241b;
+  --muted: #6d6255;
+  --snake: #2d6a4f;
+  --snake-head: #1f4d39;
+  --food: #c8553d;
+  --button: #efe7da;
+  --button-hover: #e5d7c0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.app {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.panel {
+  width: min(100%, 640px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(44, 36, 27, 0.08);
+}
+
+.panel__header,
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+h1,
+p {
+  margin: 0;
+}
+
+.subtitle,
+#status,
+.controls p {
+  color: var(--muted);
+}
+
+.scoreboard {
+  min-width: 88px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.scoreboard span {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.scoreboard strong {
+  font-size: 1.5rem;
+}
+
+.status-row {
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: var(--button);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover,
+button:focus-visible {
+  background: var(--button-hover);
+}
+
+.board-wrap {
+  margin-top: 18px;
+  overflow: auto;
+}
+
+.board {
+  --size: 20px;
+  display: grid;
+  grid-template-columns: repeat(16, var(--size));
+  grid-template-rows: repeat(16, var(--size));
+  gap: 1px;
+  width: fit-content;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+.cell {
+  width: var(--size);
+  height: var(--size);
+  background: #fbf8f1;
+}
+
+.cell--snake {
+  background: var(--snake);
+}
+
+.cell--head {
+  background: var(--snake-head);
+}
+
+.cell--food {
+  background: var(--food);
+}
+
+.controls {
+  margin-top: 18px;
+}
+
+.controls__pad {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .panel {
+    padding: 16px;
+  }
+
+  .panel__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .board {
+    --size: 18px;
+  }
+}

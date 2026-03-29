@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app">
+    <section class="panel">
+      <div class="panel__header">
+        <div>
+          <h1>Snake</h1>
+          <p class="subtitle">Classic grid movement, score tracking, and restart.</p>
+        </div>
+        <div class="scoreboard" aria-live="polite">
+          <span>Score</span>
+          <strong id="score">0</strong>
+        </div>
+      </div>
+
+      <div class="status-row">
+        <p id="status">Press Start to play.</p>
+        <div class="actions">
+          <button id="start-button" type="button">Start</button>
+          <button id="pause-button" type="button">Pause</button>
+          <button id="restart-button" type="button">Restart</button>
+        </div>
+      </div>
+
+      <div class="board-wrap">
+        <div
+          id="board"
+          class="board"
+          role="grid"
+          aria-label="Snake game board"
+        ></div>
+      </div>
+
+      <section class="controls" aria-label="Controls">
+        <p>Use Arrow keys or WASD. Space toggles pause.</p>
+        <div class="controls__pad">
+          <div></div>
+          <button type="button" data-direction="up" aria-label="Move up">Up</button>
+          <div></div>
+          <button type="button" data-direction="left" aria-label="Move left">Left</button>
+          <button type="button" data-direction="down" aria-label="Move down">Down</button>
+          <button type="button" data-direction="right" aria-label="Move right">Right</button>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="./src/snake-logic.js"></script>
+  <script src="./src/main.js"></script>
+</body>
+</html>
