@@ -8,10 +8,23 @@ type Message = {
 };
 
 type ToolLog = {
+  timestamp: string;
   tool_name: string;
   arguments: Record<string, unknown>;
   output: string;
   success: boolean;
+  error_category?: "permission_denied" | "path_violation" | "format_unsupported" | "io_failure" | null;
+};
+
+type AuditEntry = {
+  timestamp: string;
+  operation: string;
+  target_file?: string | null;
+  allowed_folder?: string | null;
+  authorization_state: string;
+  decision: string;
+  error_category?: "permission_denied" | "path_violation" | "format_unsupported" | "io_failure" | null;
+  summary: string;
 };
 
 const API_BASE_URL =
@@ -47,6 +60,7 @@ export default function HomePage() {
     },
   ]);
   const [toolLogs, setToolLogs] = useState<ToolLog[]>([]);
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -111,6 +125,7 @@ export default function HomePage() {
         },
       ]);
       setToolLogs(Array.isArray(data.tool_logs) ? data.tool_logs : []);
+      setAuditEntries(Array.isArray(data.audit_entries) ? data.audit_entries : []);
     } catch (requestError) {
       const message =
         requestError instanceof Error ? requestError.message : "发生未知错误，请稍后再试。";
@@ -244,6 +259,43 @@ export default function HomePage() {
                         {JSON.stringify(log.arguments, null, 2)}
                       </pre>
                       <pre className="mt-3 whitespace-pre-wrap text-sm text-slate-700">{log.output}</pre>
+                      {log.error_category && (
+                        <p className="mt-2 text-xs font-medium text-red-600">
+                          error_category: {log.error_category}
+                        </p>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-700">
+                  Audit Trail
+                </h2>
+                <span className="text-xs text-slate-400">{auditEntries.length} 条</span>
+              </div>
+              <div className="mt-3 space-y-3">
+                {auditEntries.length === 0 ? (
+                  <p className="text-sm text-slate-500">暂无审计记录。</p>
+                ) : (
+                  auditEntries.map((entry, index) => (
+                    <div key={`${entry.timestamp}-${index}`} className="rounded-2xl bg-white p-4 shadow-sm">
+                      <p className="text-xs text-slate-500">{entry.timestamp}</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">{entry.summary}</p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        state: {entry.authorization_state} / decision: {entry.decision}
+                      </p>
+                      {entry.target_file && (
+                        <p className="mt-1 text-xs text-slate-600">file: {entry.target_file}</p>
+                      )}
+                      {entry.error_category && (
+                        <p className="mt-1 text-xs font-medium text-red-600">
+                          error_category: {entry.error_category}
+                        </p>
+                      )}
                     </div>
                   ))
                 )}

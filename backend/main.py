@@ -1,12 +1,13 @@
 import json
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from backend.tools import OPENAI_TOOLS, TOOL_REGISTRY, get_active_permission_state, set_active_session
+from backend.tools import OPENAI_TOOLS, TOOL_REGISTRY, get_active_audit_entries, get_active_permission_state, set_active_session
 
 
 SYSTEM_PROMPT = """
@@ -47,15 +48,32 @@ class ChatRequest(BaseModel):
 
 
 class ToolLog(BaseModel):
+    timestamp: str
     tool_name: str
     arguments: Dict[str, Any]
     output: str
     success: bool
+    error_category: Optional[Literal["permission_denied", "path_violation", "format_unsupported", "io_failure"]] = None
+
+
+class AuditEntry(BaseModel):
+    timestamp: str
+    operation: str
+    target_file: Optional[str]
+    allowed_folder: Optional[str]
+    authorization_state: str
+    decision: str
+    error_category: Optional[Literal["permission_denied", "path_violation", "format_unsupported", "io_failure"]] = None
+    summary: str
+
+
+ErrorCategory = Literal["permission_denied", "path_violation", "format_unsupported", "io_failure"]
 
 
 class ChatResponse(BaseModel):
     answer: str
     tool_logs: List[ToolLog]
+    audit_entries: List[AuditEntry]
     session_state: SessionState
 
 
@@ -119,6 +137,46 @@ def _current_session_state() -> SessionState:
     )
 
 
+def _categorize_error(exc: Exception) -> Optional[ErrorCategory]:
+    text = str(exc)
+    if isinstance(exc, PermissionError):
+        if "不在授权目录" in text or "目录穿越" in text:
+            return "path_violation"
+        return "permission_denied"
+    if isinstance(exc, ValueError):
+        if "不支持" in text or "仅支持" in text:
+            return "format_unsupported"
+        if "目录穿越" in text:
+            return "path_violation"
+    if isinstance(exc, OSError):
+        return "io_failure"
+    return None
+
+
+def _build_audit_entries() -> List[AuditEntry]:
+    entries: List[AuditEntry] = []
+    for item in get_active_audit_entries():
+        operation = str(item.get("operation", "unknown"))
+        decision = str(item.get("decision", "unknown"))
+        target_file = item.get("target_file")
+        summary = f"{operation}: {decision}"
+        if target_file:
+            summary += f" ({target_file})"
+        entries.append(
+            AuditEntry(
+                timestamp=str(item.get("timestamp", "")),
+                operation=operation,
+                target_file=str(target_file) if target_file else None,
+                allowed_folder=str(item.get("allowed_folder")) if item.get("allowed_folder") else None,
+                authorization_state=str(item.get("authorization_state", "unknown")),
+                decision=decision,
+                error_category=item.get("error_category"),
+                summary=summary,
+            )
+        )
+    return entries
+
+
 @app.get("/health")
 def health_check() -> Dict[str, str]:
     return {"status": "ok"}
@@ -164,6 +222,7 @@ def run_agent(request: ChatRequest) -> ChatResponse:
             return ChatResponse(
                 answer=final_answer or "模型没有返回文本结果。",
                 tool_logs=tool_logs,
+                audit_entries=_build_audit_entries(),
                 session_state=_current_session_state(),
             )
 
@@ -175,23 +234,29 @@ def run_agent(request: ChatRequest) -> ChatResponse:
             if tool_func is None:
                 output = f"工具 {tool_name} 不存在。"
                 success = False
+                error_category: Optional[ErrorCategory] = "io_failure"
             else:
                 try:
                     output = str(tool_func(**arguments))
                     success = True
+                    error_category = None
                 except PermissionError as exc:
                     output = str(exc)
                     success = False
+                    error_category = _categorize_error(exc)
                 except Exception as exc:
                     output = f"工具执行失败: {exc}"
                     success = False
+                    error_category = _categorize_error(exc)
 
             tool_logs.append(
                 ToolLog(
+                    timestamp=datetime.utcnow().isoformat(timespec="seconds") + "Z",
                     tool_name=tool_name,
                     arguments=arguments,
                     output=output,
                     success=success,
+                    error_category=error_category,
                 )
             )
             messages.append(
