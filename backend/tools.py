@@ -98,6 +98,13 @@ def resolve_scoped_path(allowed_folder: str, filename: str) -> Path:
     return target_path
 
 
+def resolve_scoped_folder(allowed_folder: str) -> Path:
+    scoped_dir = Path(allowed_folder).expanduser().resolve()
+    if not scoped_dir.exists() or not scoped_dir.is_dir():
+        raise FileNotFoundError("授权目录不存在或不可访问。")
+    return scoped_dir
+
+
 def assert_access_granted_and_scoped(
     allowed_folder: str,
     filename: str,
@@ -113,6 +120,12 @@ def assert_access_granted_and_scoped(
         raise FileNotFoundError(f"目标文件不存在：{target_path.name}")
 
     return target_path
+
+
+def assert_access_granted_and_scoped_folder(allowed_folder: str, *, access_granted: bool) -> Path:
+    if not access_granted:
+        raise PermissionError("未获得目录访问授权，操作已拒绝。")
+    return resolve_scoped_folder(allowed_folder)
 
 
 def search_internet(query: str) -> str:
@@ -216,12 +229,10 @@ def edit_report(filename: str, content: str, allowed_folder: str, access_granted
 
 
 def list_reports(allowed_folder: str, access_granted: bool = False) -> str:
-    if not access_granted:
-        raise PermissionError("未获得目录访问授权，操作已拒绝。")
-
-    scoped_dir = Path(allowed_folder).expanduser().resolve()
-    if not scoped_dir.exists() or not scoped_dir.is_dir():
-        raise FileNotFoundError("授权目录不存在或不可访问。")
+    scoped_dir = assert_access_granted_and_scoped_folder(
+        allowed_folder,
+        access_granted=access_granted,
+    )
 
     file_names = sorted(
         item.name
