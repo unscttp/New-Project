@@ -1,6 +1,7 @@
 import json
 import re
 import shutil
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -19,6 +20,11 @@ SCOPED_PATH_DENIED_TEXT = "目标文件不在授权目录内，操作已拒绝�
 ALLOWED_REPORT_EXTENSIONS = {".md", ".docx", ".pdf"}
 ACTIVE_SESSION_ID: str = "default"
 SESSION_PERMISSION_STATE: Dict[str, Dict[str, Optional[str] | bool]] = {}
+SESSION_AUDIT_LOGS: Dict[str, List[Dict[str, Any]]] = {}
+ERROR_CATEGORY_PERMISSION_DENIED = "permission_denied"
+ERROR_CATEGORY_PATH_VIOLATION = "path_violation"
+ERROR_CATEGORY_FORMAT_UNSUPPORTED = "format_unsupported"
+ERROR_CATEGORY_IO_FAILURE = "io_failure"
 
 
 class SearchInternetArgs(BaseModel):
@@ -110,6 +116,7 @@ def set_active_session(session_id: str, initial_state: Optional[Dict[str, Any]] 
             "file_access_granted": False,
             "allowed_report_folder": None,
         }
+    SESSION_AUDIT_LOGS.setdefault(ACTIVE_SESSION_ID, [])
 
 
 def get_active_permission_state() -> Dict[str, Optional[str] | bool]:
@@ -117,6 +124,42 @@ def get_active_permission_state() -> Dict[str, Optional[str] | bool]:
         ACTIVE_SESSION_ID,
         {"file_access_granted": False, "allowed_report_folder": None},
     )
+
+
+def get_active_audit_entries() -> List[Dict[str, Any]]:
+    return list(SESSION_AUDIT_LOGS.get(ACTIVE_SESSION_ID, []))
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def record_audit_event(
+    operation: str,
+    allowed_folder: Optional[str],
+    authorization_state: str,
+    decision: str,
+    target_file: Optional[str] = None,
+    error_category: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    event: Dict[str, Any] = {
+        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "operation": operation,
+        "target_file": target_file,
+        "allowed_folder": allowed_folder,
+        "authorization_state": authorization_state,
+        "decision": decision,
+    }
+    if error_category:
+        event["error_category"] = error_category
+    if details:
+        event["details"] = details
+    SESSION_AUDIT_LOGS.setdefault(ACTIVE_SESSION_ID, []).append(event)
 
 
 def _extract_numeric_values(payload: Any) -> List[float]:
@@ -276,6 +319,13 @@ def assert_access_granted_and_scoped(allowed_folder: str) -> Path:
     scoped_folder = state.get("allowed_report_folder")
     allowed_folder_text = allowed_folder.strip()
     if not granted or not scoped_folder or not str(scoped_folder).strip():
+        record_audit_event(
+            operation="permission_check",
+            allowed_folder=allowed_folder_text or str(scoped_folder or ""),
+            authorization_state="unauthorized",
+            decision="deny",
+            error_category=ERROR_CATEGORY_PERMISSION_DENIED,
+        )
         raise PermissionError(UNAUTHORIZED_FILE_ACCESS_TEXT)
     if not allowed_folder_text:
         raise ValueError("allowed_folder 不能为空。")
@@ -283,10 +333,24 @@ def assert_access_granted_and_scoped(allowed_folder: str) -> Path:
     state_dir = Path(str(scoped_folder)).expanduser().resolve()
     request_dir = Path(allowed_folder_text).expanduser().resolve()
     if request_dir != state_dir:
+        record_audit_event(
+            operation="permission_check",
+            allowed_folder=allowed_folder_text,
+            authorization_state="authorized",
+            decision="deny",
+            error_category=ERROR_CATEGORY_PATH_VIOLATION,
+            details={"reason": "folder_not_in_scope"},
+        )
         raise PermissionError(UNAUTHORIZED_FILE_ACCESS_TEXT)
 
     report_dir = state_dir
     report_dir.mkdir(parents=True, exist_ok=True)
+    record_audit_event(
+        operation="permission_check",
+        allowed_folder=str(report_dir),
+        authorization_state="authorized",
+        decision="allow",
+    )
     return report_dir
 
 
@@ -298,11 +362,36 @@ def resolve_scoped_path(allowed_folder: str, filename: str) -> Path:
 
     candidate = Path(filename_text)
     if candidate.name != filename_text or candidate.parent != Path("."):
+        record_audit_event(
+            operation="path_resolution",
+            target_file=filename_text,
+            allowed_folder=allowed_folder.strip(),
+            authorization_state="authorized",
+            decision="deny",
+            error_category=ERROR_CATEGORY_PATH_VIOLATION,
+            details={"reason": "invalid_filename"},
+        )
         raise PermissionError(SCOPED_PATH_DENIED_TEXT)
 
     target_path = (report_dir / candidate.name).resolve()
     if report_dir not in target_path.parents:
+        record_audit_event(
+            operation="path_resolution",
+            target_file=filename_text,
+            allowed_folder=str(report_dir),
+            authorization_state="authorized",
+            decision="deny",
+            error_category=ERROR_CATEGORY_PATH_VIOLATION,
+            details={"reason": "path_out_of_scope"},
+        )
         raise PermissionError(SCOPED_PATH_DENIED_TEXT)
+    record_audit_event(
+        operation="path_resolution",
+        target_file=target_path.name,
+        allowed_folder=str(report_dir),
+        authorization_state="authorized",
+        decision="allow",
+    )
     return target_path
 
 
@@ -310,7 +399,23 @@ def _ensure_supported_read_extension(path: Path) -> str:
     ext = path.suffix.lower()
     if ext not in {".md", ".docx"}:
         if ext == ".pdf":
+            record_audit_event(
+                operation="read_report",
+                target_file=path.name,
+                allowed_folder=str(path.parent),
+                authorization_state="authorized",
+                decision="deny",
+                error_category=ERROR_CATEGORY_FORMAT_UNSUPPORTED,
+            )
             raise ValueError("MVP 暂不支持读取 PDF 正文；仅支持 .md/.docx。")
+        record_audit_event(
+            operation="read_report",
+            target_file=path.name,
+            allowed_folder=str(path.parent),
+            authorization_state="authorized",
+            decision="deny",
+            error_category=ERROR_CATEGORY_FORMAT_UNSUPPORTED,
+        )
         raise ValueError("仅支持 .md/.docx 文件。")
     return ext
 
@@ -318,8 +423,24 @@ def _ensure_supported_read_extension(path: Path) -> str:
 def _ensure_supported_edit_extension(path: Path) -> str:
     ext = path.suffix.lower()
     if ext == ".pdf":
+        record_audit_event(
+            operation="edit_report",
+            target_file=path.name,
+            allowed_folder=str(path.parent),
+            authorization_state="authorized",
+            decision="deny",
+            error_category=ERROR_CATEGORY_FORMAT_UNSUPPORTED,
+        )
         raise ValueError("MVP 暂不支持编辑 PDF；请改用 .md/.docx。")
     if ext not in {".md", ".docx"}:
+        record_audit_event(
+            operation="edit_report",
+            target_file=path.name,
+            allowed_folder=str(path.parent),
+            authorization_state="authorized",
+            decision="deny",
+            error_category=ERROR_CATEGORY_FORMAT_UNSUPPORTED,
+        )
         raise ValueError("仅支持编辑 .md/.docx 文件。")
     return ext
 
@@ -439,6 +560,13 @@ def confirm_report_folder_access(granted: bool, folder: str) -> str:
         "file_access_granted": bool(granted),
         "allowed_report_folder": folder_text if granted else None,
     }
+    record_audit_event(
+        operation="confirm_report_folder_access",
+        allowed_folder=folder_text,
+        authorization_state="authorized" if granted else "unauthorized",
+        decision="allow" if granted else "deny",
+        error_category=None if granted else ERROR_CATEGORY_PERMISSION_DENIED,
+    )
     if granted:
         return json.dumps(
             {
@@ -507,7 +635,17 @@ def save_report(
 
 def save_report_file(allowed_folder: str, filename: str, content: str) -> str:
     target_path = resolve_scoped_path(allowed_folder, filename)
+    before_hash = _sha256_text(target_path.read_text(encoding="utf-8")) if target_path.exists() else None
     target_path.write_text(content, encoding="utf-8")
+    after_hash = _sha256_text(content)
+    record_audit_event(
+        operation="save_report_file",
+        target_file=target_path.name,
+        allowed_folder=str(target_path.parent),
+        authorization_state="authorized",
+        decision="allow",
+        details={"checksum_before": before_hash, "checksum_after": after_hash},
+    )
     return f"文件已保存：{target_path}"
 
 
@@ -526,7 +664,18 @@ def edit_report_file(allowed_folder: str, filename: str, content: str) -> str:
         raise FileNotFoundError(f"文件不存在：{target_path.name}")
     if not target_path.is_file():
         raise PermissionError(SCOPED_PATH_DENIED_TEXT)
+    before_text = target_path.read_text(encoding="utf-8")
+    before_hash = _sha256_text(before_text)
     target_path.write_text(content, encoding="utf-8")
+    after_hash = _sha256_text(content)
+    record_audit_event(
+        operation="edit_report_file",
+        target_file=target_path.name,
+        allowed_folder=str(target_path.parent),
+        authorization_state="authorized",
+        decision="allow",
+        details={"checksum_before": before_hash, "checksum_after": after_hash},
+    )
     return f"文件已更新：{target_path}"
 
 
@@ -577,8 +726,10 @@ def edit_report(file_name: str, folder: str, instruction: str, mode: Literal["ap
 
     if ext == ".md":
         original = target_path.read_text(encoding="utf-8")
+        before_hash = _sha256_text(original)
         new_content, sections, touched_lines = _edit_markdown_content(original, instruction, mode)
         target_path.write_text(new_content, encoding="utf-8")
+        after_hash = _sha256_text(new_content)
         summary = {
             "file_name": target_path.name,
             "format": "md",
@@ -588,10 +739,26 @@ def edit_report(file_name: str, folder: str, instruction: str, mode: Literal["ap
             "line_count_after": len(new_content.splitlines()),
             "touched_line_count": touched_lines,
             "backup_path": str(backup_path),
+            "checksum_before": before_hash,
+            "checksum_after": after_hash,
         }
+        record_audit_event(
+            operation="edit_report",
+            target_file=target_path.name,
+            allowed_folder=str(target_path.parent),
+            authorization_state="authorized",
+            decision="allow",
+            details={
+                "mode": mode,
+                "changed_sections": sections,
+                "checksum_before": before_hash,
+                "checksum_after": after_hash,
+            },
+        )
         return json.dumps(summary, ensure_ascii=False, indent=2)
 
     doc = Document(target_path)
+    before_hash = _sha256_bytes(target_path.read_bytes())
     changed_sections: List[str] = []
     paragraph_count_before = len(doc.paragraphs)
     touched_paragraphs = 0
@@ -641,6 +808,7 @@ def edit_report(file_name: str, folder: str, instruction: str, mode: Literal["ap
         changed_sections = [section_name]
 
     doc.save(target_path)
+    after_hash = _sha256_bytes(target_path.read_bytes())
     summary = {
         "file_name": target_path.name,
         "format": "docx",
@@ -650,7 +818,22 @@ def edit_report(file_name: str, folder: str, instruction: str, mode: Literal["ap
         "paragraph_count_after": len(Document(target_path).paragraphs),
         "touched_paragraph_count": touched_paragraphs,
         "backup_path": str(backup_path),
+        "checksum_before": before_hash,
+        "checksum_after": after_hash,
     }
+    record_audit_event(
+        operation="edit_report",
+        target_file=target_path.name,
+        allowed_folder=str(target_path.parent),
+        authorization_state="authorized",
+        decision="allow",
+        details={
+            "mode": mode,
+            "changed_sections": changed_sections,
+            "checksum_before": before_hash,
+            "checksum_after": after_hash,
+        },
+    )
     return json.dumps(summary, ensure_ascii=False, indent=2)
 
 
