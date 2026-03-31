@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -61,6 +62,24 @@ class EditReportFileArgs(BaseModel):
     allowed_folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
     filename: str = Field(..., description="仅文件名，例如 summary.md。")
     content: str = Field(..., description="编辑后完整内容（覆盖写入）。")
+
+
+class ReadReportArgs(BaseModel):
+    file_name: str = Field(..., description="仅文件名，例如 summary.md。")
+    folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+
+
+class EditReportArgs(BaseModel):
+    file_name: str = Field(..., description="仅文件名，例如 summary.md。")
+    folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+    instruction: str = Field(
+        ...,
+        description="编辑指令文本。replace_section 模式建议使用“section: 节标题\\n---\\n新内容”。",
+    )
+    mode: Literal["append", "replace_section", "rewrite"] = Field(
+        ...,
+        description="编辑模式：append、replace_section、rewrite。",
+    )
 
 
 class ListReportFilesArgs(BaseModel):
@@ -287,6 +306,109 @@ def resolve_scoped_path(allowed_folder: str, filename: str) -> Path:
     return target_path
 
 
+def _ensure_supported_read_extension(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext not in {".md", ".docx"}:
+        if ext == ".pdf":
+            raise ValueError("MVP 暂不支持读取 PDF 正文；仅支持 .md/.docx。")
+        raise ValueError("仅支持 .md/.docx 文件。")
+    return ext
+
+
+def _ensure_supported_edit_extension(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        raise ValueError("MVP 暂不支持编辑 PDF；请改用 .md/.docx。")
+    if ext not in {".md", ".docx"}:
+        raise ValueError("仅支持编辑 .md/.docx 文件。")
+    return ext
+
+
+def _make_backup(path: Path) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    backup_path = path.with_name(f"{path.name}.bak.{timestamp}")
+    shutil.copy2(path, backup_path)
+    return backup_path
+
+
+def _parse_replace_instruction(instruction: str) -> tuple[str, str]:
+    text = instruction.strip()
+    if "\n---\n" in text:
+        head, body = text.split("\n---\n", 1)
+    else:
+        lines = text.splitlines()
+        if len(lines) < 2:
+            raise ValueError("replace_section 模式需要 section 标题和新内容。")
+        head, body = lines[0], "\n".join(lines[1:])
+
+    section = re.sub(r"^section\s*:\s*", "", head.strip(), flags=re.IGNORECASE).strip().lstrip("#").strip()
+    if not section:
+        raise ValueError("replace_section 模式缺少 section 标题。")
+    return section, body.strip()
+
+
+def _extract_md_headings(lines: List[str]) -> List[tuple[int, int, str]]:
+    headings: List[tuple[int, int, str]] = []
+    for idx, line in enumerate(lines):
+        match = re.match(r"^(#{1,6})\s+(.*)$", line.strip())
+        if not match:
+            continue
+        level = len(match.group(1))
+        title = match.group(2).strip()
+        headings.append((idx, level, title))
+    return headings
+
+
+def _edit_markdown_content(original: str, instruction: str, mode: str) -> tuple[str, List[str], int]:
+    normalized = original.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    changed_sections: List[str] = []
+
+    if mode == "append":
+        append_text = instruction.strip()
+        if not append_text:
+            raise ValueError("append 模式下 instruction 不能为空。")
+        merged = normalized.rstrip("\n")
+        if merged:
+            merged = f"{merged}\n\n{append_text}\n"
+        else:
+            merged = f"{append_text}\n"
+        return merged, ["__appended__"], len(append_text.splitlines())
+
+    if mode == "rewrite":
+        rewritten = instruction.strip()
+        if not rewritten:
+            raise ValueError("rewrite 模式下 instruction 不能为空。")
+        return f"{rewritten}\n", ["__all__"], len(rewritten.splitlines())
+
+    section_name, replacement = _parse_replace_instruction(instruction)
+    headings = _extract_md_headings(lines)
+    target_index = None
+    target_level = None
+    for idx, level, title in headings:
+        if title.lower() == section_name.lower():
+            target_index = idx
+            target_level = level
+            break
+    if target_index is None or target_level is None:
+        raise ValueError(f"未找到 Markdown 节：{section_name}")
+
+    end_index = len(lines)
+    for idx, level, _ in headings:
+        if idx > target_index and level <= target_level:
+            end_index = idx
+            break
+
+    heading_line = lines[target_index]
+    replacement_block = [heading_line]
+    replacement_lines = replacement.splitlines()
+    if replacement_lines:
+        replacement_block.extend(replacement_lines)
+    new_lines = lines[:target_index] + replacement_block + lines[end_index:]
+    changed_sections.append(section_name)
+    return "\n".join(new_lines).rstrip("\n") + "\n", changed_sections, len(replacement_lines)
+
+
 def request_report_folder_access(purpose: str, folder: str) -> str:
     purpose_text = purpose.strip()
     folder_text = folder.strip()
@@ -408,6 +530,130 @@ def edit_report_file(allowed_folder: str, filename: str, content: str) -> str:
     return f"文件已更新：{target_path}"
 
 
+def read_report(file_name: str, folder: str) -> str:
+    target_path = resolve_scoped_path(folder, file_name)
+    if not target_path.exists():
+        raise FileNotFoundError(f"文件不存在：{target_path.name}")
+    if not target_path.is_file():
+        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
+
+    ext = _ensure_supported_read_extension(target_path)
+    if ext == ".md":
+        content = target_path.read_text(encoding="utf-8")
+        return json.dumps(
+            {
+                "file_name": target_path.name,
+                "format": "md",
+                "line_count": len(content.splitlines()),
+                "content": content,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    doc = Document(target_path)
+    paragraphs = [p.text for p in doc.paragraphs]
+    return json.dumps(
+        {
+            "file_name": target_path.name,
+            "format": "docx",
+            "paragraph_count": len(paragraphs),
+            "content": "\n".join(paragraphs),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def edit_report(file_name: str, folder: str, instruction: str, mode: Literal["append", "replace_section", "rewrite"]) -> str:
+    target_path = resolve_scoped_path(folder, file_name)
+    if not target_path.exists():
+        raise FileNotFoundError(f"文件不存在：{target_path.name}")
+    if not target_path.is_file():
+        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
+
+    ext = _ensure_supported_edit_extension(target_path)
+    backup_path = _make_backup(target_path)
+
+    if ext == ".md":
+        original = target_path.read_text(encoding="utf-8")
+        new_content, sections, touched_lines = _edit_markdown_content(original, instruction, mode)
+        target_path.write_text(new_content, encoding="utf-8")
+        summary = {
+            "file_name": target_path.name,
+            "format": "md",
+            "mode": mode,
+            "changed_sections": sections,
+            "line_count_before": len(original.splitlines()),
+            "line_count_after": len(new_content.splitlines()),
+            "touched_line_count": touched_lines,
+            "backup_path": str(backup_path),
+        }
+        return json.dumps(summary, ensure_ascii=False, indent=2)
+
+    doc = Document(target_path)
+    changed_sections: List[str] = []
+    paragraph_count_before = len(doc.paragraphs)
+    touched_paragraphs = 0
+
+    if mode == "append":
+        append_text = instruction.strip()
+        if not append_text:
+            raise ValueError("append 模式下 instruction 不能为空。")
+        for line in append_text.splitlines():
+            doc.add_paragraph(line)
+            touched_paragraphs += 1
+        changed_sections = ["__appended__"]
+    elif mode == "rewrite":
+        for _ in range(len(doc.paragraphs)):
+            p = doc.paragraphs[0]._element
+            p.getparent().remove(p)
+        for line in instruction.strip().splitlines():
+            doc.add_paragraph(line)
+            touched_paragraphs += 1
+        changed_sections = ["__all__"]
+    else:
+        section_name, replacement = _parse_replace_instruction(instruction)
+        replacement_lines = replacement.splitlines()
+        start_idx = None
+        for idx, paragraph in enumerate(doc.paragraphs):
+            if paragraph.text.strip().lower() == section_name.lower():
+                start_idx = idx
+                break
+        if start_idx is None:
+            raise ValueError(f"未找到 DOCX 段落标题：{section_name}")
+        end_idx = len(doc.paragraphs)
+        for idx in range(start_idx + 1, len(doc.paragraphs)):
+            if doc.paragraphs[idx].style and str(doc.paragraphs[idx].style.name).lower().startswith("heading"):
+                end_idx = idx
+                break
+        anchor = doc.paragraphs[start_idx]._element
+        for _ in range(end_idx - start_idx - 1):
+            nxt = anchor.getnext()
+            if nxt is not None:
+                nxt.getparent().remove(nxt)
+                touched_paragraphs += 1
+        for line in replacement_lines:
+            new_para = doc.add_paragraph(line)
+            anchor.addnext(new_para._element)
+            anchor = new_para._element
+            touched_paragraphs += 1
+        changed_sections = [section_name]
+
+    doc.save(target_path)
+    summary = {
+        "file_name": target_path.name,
+        "format": "docx",
+        "mode": mode,
+        "changed_sections": changed_sections,
+        "paragraph_count_before": paragraph_count_before,
+        "paragraph_count_after": len(Document(target_path).paragraphs),
+        "touched_paragraph_count": touched_paragraphs,
+        "backup_path": str(backup_path),
+    }
+    return json.dumps(summary, ensure_ascii=False, indent=2)
+
+
 def list_report_files(allowed_folder: str) -> str:
     report_dir = assert_access_granted_and_scoped(allowed_folder)
     files = sorted(
@@ -434,6 +680,8 @@ TOOL_REGISTRY = {
     "save_report_file": save_report_file,
     "read_report_file": read_report_file,
     "edit_report_file": edit_report_file,
+    "read_report": read_report,
+    "edit_report": edit_report,
     "list_report_files": list_report_files,
 }
 
@@ -509,6 +757,22 @@ OPENAI_TOOLS: List[Dict[str, Any]] = [
             "name": "edit_report_file",
             "description": "在授权目录内按文件名覆盖编辑报告内容，拒绝任意路径输入。",
             "parameters": EditReportFileArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_report",
+            "description": "读取授权目录中的 .md/.docx 报告内容（MVP 不支持 PDF 正文读取）。",
+            "parameters": ReadReportArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_report",
+            "description": "编辑授权目录中的 .md/.docx 报告，支持 append/replace_section/rewrite，并自动创建同目录备份。",
+            "parameters": EditReportArgs.model_json_schema(),
         },
     },
     {
