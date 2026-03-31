@@ -2,11 +2,14 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import pandas as pd
 from duckduckgo_search import DDGS
 from pydantic import BaseModel, Field
+from docx import Document
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -62,6 +65,17 @@ class EditReportFileArgs(BaseModel):
 
 class ListReportFilesArgs(BaseModel):
     allowed_folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+
+
+class SaveReportArgs(BaseModel):
+    title: str = Field(..., description="报告标题。")
+    content: str = Field(..., description="报告正文，可为 markdown 或纯文本。")
+    format: Literal["md", "docx", "pdf"] = Field(..., description="导出格式：md、docx、pdf。")
+    folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+    filename: Optional[str] = Field(
+        default=None,
+        description="可选文件名（可不含后缀）。为空时自动生成日期+标题文件名。",
+    )
 
 
 def set_active_session(session_id: str, initial_state: Optional[Dict[str, Any]] = None) -> None:
@@ -159,6 +173,82 @@ def _safe_report_path(title: str, report_dir: Path) -> Path:
         raise ValueError("非法文件路径，已阻止目录穿越。")
 
     return target_path
+
+
+def _make_safe_stem(stem: str) -> str:
+    safe_stem = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff_-]+", "-", stem).strip("-_")
+    return safe_stem or "untitled-report"
+
+
+def _resolve_report_output_path(folder: str, title: str, format_name: str, filename: Optional[str]) -> Path:
+    report_dir = assert_access_granted_and_scoped(folder)
+    extension = f".{format_name}"
+
+    if filename and filename.strip():
+        raw_name = filename.strip()
+        raw_path = Path(raw_name)
+        if raw_path.name != raw_name or raw_path.parent != Path("."):
+            raise PermissionError(SCOPED_PATH_DENIED_TEXT)
+        stem = _make_safe_stem(raw_path.stem)
+        target_name = f"{stem}{extension}"
+    else:
+        date_prefix = datetime.now().strftime("%Y-%m-%d")
+        target_name = f"{date_prefix}-{_make_safe_stem(title)}{extension}"
+
+    target_path = (report_dir / target_name).resolve()
+    if report_dir not in target_path.parents:
+        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
+    return target_path
+
+
+def _iter_content_lines(content: str) -> List[str]:
+    cleaned = content.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return cleaned.split("\n") if cleaned else []
+
+
+def _write_docx_report(path: Path, title: str, content: str) -> None:
+    doc = Document()
+    doc.add_heading(title.strip(), level=1)
+    for line in _iter_content_lines(content):
+        stripped = line.strip()
+        if not stripped:
+            doc.add_paragraph("")
+            continue
+        if stripped.startswith("#"):
+            heading_text = stripped.lstrip("#").strip() or " "
+            doc.add_heading(heading_text, level=2)
+        else:
+            doc.add_paragraph(stripped)
+    doc.save(path)
+
+
+def _write_pdf_report(path: Path, title: str, content: str) -> None:
+    pdf = canvas.Canvas(str(path), pagesize=A4)
+    width, height = A4
+    margin_x = 50
+    y = height - 60
+
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(margin_x, y, title.strip() or "Untitled Report")
+    y -= 30
+
+    pdf.setFont("Helvetica", 11)
+    for line in _iter_content_lines(content):
+        stripped = line.strip()
+        if y < 50:
+            pdf.showPage()
+            pdf.setFont("Helvetica", 11)
+            y = height - 60
+        if stripped.startswith("#"):
+            text = stripped.lstrip("#").strip() or " "
+            pdf.setFont("Helvetica-Bold", 12)
+            pdf.drawString(margin_x, y, text)
+            pdf.setFont("Helvetica", 11)
+        else:
+            pdf.drawString(margin_x, y, stripped)
+        y -= 18
+
+    pdf.save()
 
 
 def assert_access_granted_and_scoped(allowed_folder: str) -> Path:
@@ -264,6 +354,35 @@ def generate_markdown_report(title: str, content: str) -> str:
     return f"报告已生成：{report_path}"
 
 
+def save_report(
+    title: str,
+    content: str,
+    format: Literal["md", "docx", "pdf"],
+    folder: str,
+    filename: Optional[str] = None,
+) -> str:
+    title_text = title.strip()
+    if not title_text:
+        raise ValueError("title 不能为空。")
+
+    content_text = content.strip()
+    if not content_text:
+        raise ValueError("content 不能为空。")
+
+    target_path = _resolve_report_output_path(folder, title_text, format, filename)
+    if format == "md":
+        markdown = f"# {title_text}\n\n{content_text}\n"
+        target_path.write_text(markdown, encoding="utf-8")
+    elif format == "docx":
+        _write_docx_report(target_path, title_text, content_text)
+    elif format == "pdf":
+        _write_pdf_report(target_path, title_text, content_text)
+    else:
+        raise ValueError("不支持的 format，必须是 md/docx/pdf。")
+
+    return f"报告已导出：{target_path}"
+
+
 def save_report_file(allowed_folder: str, filename: str, content: str) -> str:
     target_path = resolve_scoped_path(allowed_folder, filename)
     target_path.write_text(content, encoding="utf-8")
@@ -311,6 +430,7 @@ TOOL_REGISTRY = {
     "request_report_folder_access": request_report_folder_access,
     "confirm_report_folder_access": confirm_report_folder_access,
     "generate_markdown_report": generate_markdown_report,
+    "save_report": save_report,
     "save_report_file": save_report_file,
     "read_report_file": read_report_file,
     "edit_report_file": edit_report_file,
@@ -357,6 +477,14 @@ OPENAI_TOOLS: List[Dict[str, Any]] = [
             "name": "generate_markdown_report",
             "description": "把给定标题和内容保存为 Markdown 报告到已授权目录。",
             "parameters": GenerateMarkdownReportArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_report",
+            "description": "在已授权目录导出报告为 md/docx/pdf；调用前必须完成 request_report_folder_access + confirm_report_folder_access，并将 folder 设为已授权目录。",
+            "parameters": SaveReportArgs.model_json_schema(),
         },
     },
     {
