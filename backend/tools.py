@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 
 
 BASE_DIR = Path(__file__).resolve().parent
-REPORTS_DIR = (BASE_DIR / "generated_reports").resolve()
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_REPORTS_DIR = (BASE_DIR / "generated_reports").resolve()
+DEFAULT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_REPORT_EXTENSIONS = {".md", ".docx", ".pdf"}
 
 
 class SearchInternetArgs(BaseModel):
@@ -25,9 +26,32 @@ class AnalyzeTrendDataArgs(BaseModel):
     )
 
 
-class GenerateMarkdownReportArgs(BaseModel):
+class PermissionScopeArgs(BaseModel):
+    allowed_folder: str = Field(..., description="当前授权可访问的目录路径。")
+    access_granted: bool = Field(default=False, description="当前会话是否已获得目录访问授权。")
+
+
+class GenerateMarkdownReportArgs(PermissionScopeArgs):
     title: str = Field(..., description="Markdown 报告标题。")
     content: str = Field(..., description="Markdown 报告正文内容。")
+
+
+class SaveReportArgs(PermissionScopeArgs):
+    filename: str = Field(..., description="报告文件名（仅文件名，不支持路径）。")
+    content: str = Field(..., description="报告正文内容。")
+
+
+class ReadReportArgs(PermissionScopeArgs):
+    filename: str = Field(..., description="要读取的报告文件名（仅文件名，不支持路径）。")
+
+
+class EditReportArgs(PermissionScopeArgs):
+    filename: str = Field(..., description="要编辑的报告文件名（仅文件名，不支持路径）。")
+    content: str = Field(..., description="新的完整文件内容。")
+
+
+class ListReportsArgs(PermissionScopeArgs):
+    pass
 
 
 def _extract_numeric_values(payload: Any) -> List[float]:
@@ -49,6 +73,46 @@ def _extract_numeric_values(payload: Any) -> List[float]:
         return [float(value) for value in payload.values() if isinstance(value, (int, float))]
 
     return []
+
+
+def _sanitize_filename(filename: str) -> str:
+    normalized = filename.strip()
+    if not normalized:
+        raise ValueError("filename 不能为空。")
+
+    candidate = Path(normalized)
+    if candidate.name != normalized or normalized in {".", ".."}:
+        raise ValueError("目标文件不在授权目录内，操作已拒绝。")
+
+    return normalized
+
+
+def resolve_scoped_path(allowed_folder: str, filename: str) -> Path:
+    safe_filename = _sanitize_filename(filename)
+    scoped_dir = Path(allowed_folder).expanduser().resolve()
+    target_path = (scoped_dir / safe_filename).resolve()
+
+    if target_path.parent != scoped_dir:
+        raise ValueError("目标文件不在授权目录内，操作已拒绝。")
+
+    return target_path
+
+
+def assert_access_granted_and_scoped(
+    allowed_folder: str,
+    filename: str,
+    *,
+    access_granted: bool,
+    require_exists: bool = False,
+) -> Path:
+    if not access_granted:
+        raise PermissionError("未获得目录访问授权，操作已拒绝。")
+
+    target_path = resolve_scoped_path(allowed_folder, filename)
+    if require_exists and not target_path.exists():
+        raise FileNotFoundError(f"目标文件不存在：{target_path.name}")
+
+    return target_path
 
 
 def search_internet(query: str) -> str:
@@ -93,33 +157,91 @@ def analyze_trend_data(data_json: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-def _safe_report_path(title: str) -> Path:
+def generate_markdown_report(
+    title: str,
+    content: str,
+    allowed_folder: str,
+    access_granted: bool = False,
+) -> str:
+    """在授权目录中生成 Markdown 报告，并做路径安全校验。"""
+    if not title.strip():
+        raise ValueError("title 不能为空。")
+
     safe_title = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff_-]+", "-", title).strip("-_")
     safe_title = safe_title or "untitled-report"
     filename = f"{datetime.now().strftime('%Y-%m-%d')}-{safe_title}.md"
 
-    target_path = (REPORTS_DIR / filename).resolve()
-    if REPORTS_DIR not in target_path.parents and target_path != REPORTS_DIR:
-        raise ValueError("非法文件路径，已阻止目录穿越。")
+    report_path = assert_access_granted_and_scoped(
+        allowed_folder,
+        filename,
+        access_granted=access_granted,
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
 
-    return target_path
-
-
-def generate_markdown_report(title: str, content: str) -> str:
-    """在固定目录中生成 Markdown 报告，并做路径安全校验。"""
-    if not title.strip():
-        raise ValueError("title 不能为空。")
-
-    report_path = _safe_report_path(title)
     markdown = f"# {title.strip()}\n\n{content.strip()}\n"
     report_path.write_text(markdown, encoding="utf-8")
-    return f"报告已生成：{report_path}"
+    return f"报告已生成：{report_path.name}"
+
+
+def save_report(filename: str, content: str, allowed_folder: str, access_granted: bool = False) -> str:
+    report_path = assert_access_granted_and_scoped(
+        allowed_folder,
+        filename,
+        access_granted=access_granted,
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(content.strip() + "\n", encoding="utf-8")
+    return f"报告已保存：{report_path.name}"
+
+
+def read_report(filename: str, allowed_folder: str, access_granted: bool = False) -> str:
+    report_path = assert_access_granted_and_scoped(
+        allowed_folder,
+        filename,
+        access_granted=access_granted,
+        require_exists=True,
+    )
+    return report_path.read_text(encoding="utf-8")
+
+
+def edit_report(filename: str, content: str, allowed_folder: str, access_granted: bool = False) -> str:
+    report_path = assert_access_granted_and_scoped(
+        allowed_folder,
+        filename,
+        access_granted=access_granted,
+        require_exists=True,
+    )
+    report_path.write_text(content.strip() + "\n", encoding="utf-8")
+    return f"报告已更新：{report_path.name}"
+
+
+def list_reports(allowed_folder: str, access_granted: bool = False) -> str:
+    if not access_granted:
+        raise PermissionError("未获得目录访问授权，操作已拒绝。")
+
+    scoped_dir = Path(allowed_folder).expanduser().resolve()
+    if not scoped_dir.exists() or not scoped_dir.is_dir():
+        raise FileNotFoundError("授权目录不存在或不可访问。")
+
+    file_names = sorted(
+        item.name
+        for item in scoped_dir.iterdir()
+        if item.is_file() and item.suffix.lower() in ALLOWED_REPORT_EXTENSIONS
+    )
+    if not file_names:
+        return "授权目录内暂无可用报告文件。"
+
+    return "\n".join(file_names)
 
 
 TOOL_REGISTRY = {
     "search_internet": search_internet,
     "analyze_trend_data": analyze_trend_data,
     "generate_markdown_report": generate_markdown_report,
+    "save_report": save_report,
+    "read_report": read_report,
+    "edit_report": edit_report,
+    "list_reports": list_reports,
 }
 
 
@@ -144,8 +266,40 @@ OPENAI_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "generate_markdown_report",
-            "description": "把给定标题和内容保存为 Markdown 报告到固定目录。",
+            "description": "把给定标题和内容保存为 Markdown 报告到授权目录。",
             "parameters": GenerateMarkdownReportArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_report",
+            "description": "将内容保存为报告文件。仅允许在授权目录中按文件名写入。",
+            "parameters": SaveReportArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_report",
+            "description": "读取授权目录内的报告文件内容。仅允许传入文件名。",
+            "parameters": ReadReportArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_report",
+            "description": "编辑授权目录内的报告文件。仅允许传入文件名。",
+            "parameters": EditReportArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_reports",
+            "description": "列出授权目录内的报告文件（仅 .md/.docx/.pdf）。",
+            "parameters": ListReportsArgs.model_json_schema(),
         },
     },
 ]
