@@ -1,4 +1,4 @@
-﻿import json
+import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from backend.tools import OPENAI_TOOLS, TOOL_REGISTRY
+from backend.tools import OPENAI_TOOLS, TOOL_REGISTRY, get_active_permission_state, set_active_session
 
 
 SYSTEM_PROMPT = """
@@ -15,10 +15,11 @@ SYSTEM_PROMPT = """
 工作原则：
 1. 当任务需要外部信息时，优先调用 search_internet。
 2. 当用户提供 JSON 数值数据且需要统计分析时，调用 analyze_trend_data。
-3. 当用户明确要求生成报告、保存结果、沉淀结论时，调用 generate_markdown_report。
-4. 你可以多次调用工具，直到获得足够信息后再给出最终答复。
-5. 如果工具执行失败，请根据错误信息修正调用参数并继续尝试，或向用户说明限制。
-6. 最终回答请使用中文，尽量清晰、结构化，并结合工具结果。
+3. 任何保存/编辑/生成报告等文件操作前，必须先调用 request_report_folder_access，再调用 confirm_report_folder_access，获得明确授权后才能调用文件工具。
+4. 当用户明确要求生成报告、保存结果、沉淀结论时，满足授权流程后调用 generate_markdown_report。
+5. 你可以多次调用工具，直到获得足够信息后再给出最终答复。
+6. 如果工具执行失败，请根据错误信息修正调用参数并继续尝试，或向用户说明限制。
+7. 最终回答请使用中文，尽量清晰、结构化，并结合工具结果。
 """.strip()
 
 MAX_TOOL_ROUNDS = 8
@@ -29,11 +30,18 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class SessionState(BaseModel):
+    file_access_granted: bool = Field(default=False, description="当前会话是否已授权文件访问。")
+    allowed_report_folder: Optional[str] = Field(default=None, description="当前会话被授权的报告目录。")
+
+
 class ChatRequest(BaseModel):
     api_key: str = Field(..., description="用户自带的 DeepSeek API Key。")
     message: str = Field(..., description="本轮用户输入。")
     history: List[ChatMessage] = Field(default_factory=list, description="历史对话。")
     model: str = Field(default="deepseek-chat", description="要调用的 DeepSeek 模型。")
+    session_id: str = Field(default="default", description="当前会话 ID，用于持久化工具授权状态。")
+    session_state: SessionState = Field(default_factory=SessionState, description="当前会话权限状态。")
 
 
 class ToolLog(BaseModel):
@@ -46,6 +54,7 @@ class ToolLog(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     tool_logs: List[ToolLog]
+    session_state: SessionState
 
 
 app = FastAPI(title="Lightweight AI Agent MVP")
@@ -100,6 +109,14 @@ def _safe_parse_arguments(raw_arguments: Optional[str]) -> Dict[str, Any]:
         return {"raw_input": raw_arguments}
 
 
+def _current_session_state() -> SessionState:
+    state = get_active_permission_state()
+    return SessionState(
+        file_access_granted=bool(state.get("file_access_granted", False)),
+        allowed_report_folder=state.get("allowed_report_folder"),
+    )
+
+
 @app.get("/health")
 def health_check() -> Dict[str, str]:
     return {"status": "ok"}
@@ -108,6 +125,7 @@ def health_check() -> Dict[str, str]:
 @app.post("/api/agent", response_model=ChatResponse)
 def run_agent(request: ChatRequest) -> ChatResponse:
     client = create_client(request.api_key)
+    set_active_session(request.session_id, request.session_state.model_dump())
     messages = build_messages(request.history, request.message)
     tool_logs: List[ToolLog] = []
 
@@ -141,7 +159,11 @@ def run_agent(request: ChatRequest) -> ChatResponse:
 
         if not assistant_message.tool_calls:
             final_answer = _normalize_content(assistant_message.content).strip()
-            return ChatResponse(answer=final_answer or "模型没有返回文本结果。", tool_logs=tool_logs)
+            return ChatResponse(
+                answer=final_answer or "模型没有返回文本结果。",
+                tool_logs=tool_logs,
+                session_state=_current_session_state(),
+            )
 
         for tool_call in assistant_message.tool_calls:
             tool_name = tool_call.function.name
@@ -155,6 +177,9 @@ def run_agent(request: ChatRequest) -> ChatResponse:
                 try:
                     output = str(tool_func(**arguments))
                     success = True
+                except PermissionError as exc:
+                    output = str(exc)
+                    success = False
                 except Exception as exc:
                     output = f"工具执行失败: {exc}"
                     success = False
