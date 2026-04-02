@@ -13,6 +13,14 @@ from docx import Document
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
+from .low_risk.creation import save_report_file as save_report_file_low_risk
+from .medium_risk.editing import edit_report_file as edit_report_file_medium_risk
+from .risk_control import (
+    assert_tool_access,
+    set_active_risk_level,
+    set_active_session as set_active_risk_session,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent
 UNAUTHORIZED_FILE_ACCESS_TEXT = "未授权文件访问，请先确认目录和权限。"
@@ -92,6 +100,14 @@ class ListReportFilesArgs(BaseModel):
     allowed_folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
 
 
+
+
+class SelectToolRiskLevelArgs(BaseModel):
+    risk_level: Literal["low", "medium", "high"] = Field(
+        ...,
+        description="工具风险级别：low、medium、high。",
+    )
+
 class SaveReportArgs(BaseModel):
     title: str = Field(..., description="报告标题。")
     content: str = Field(..., description="报告正文，可为 markdown 或纯文本。")
@@ -117,6 +133,7 @@ def set_active_session(session_id: str, initial_state: Optional[Dict[str, Any]] 
             "allowed_report_folder": None,
         }
     SESSION_AUDIT_LOGS.setdefault(ACTIVE_SESSION_ID, [])
+    set_active_risk_session(ACTIVE_SESSION_ID)
 
 
 def get_active_permission_state() -> Dict[str, Optional[str] | bool]:
@@ -604,6 +621,33 @@ def generate_markdown_report(title: str, content: str) -> str:
     return f"报告已生成：{report_path}"
 
 
+
+TOOL_RISK_LEVELS: Dict[str, str] = {
+    "search_internet": "low",
+    "analyze_trend_data": "low",
+    "request_report_folder_access": "low",
+    "confirm_report_folder_access": "low",
+    "generate_markdown_report": "low",
+    "save_report": "low",
+    "save_report_file": "low",
+    "read_report_file": "low",
+    "edit_report_file": "medium",
+    "read_report": "medium",
+    "edit_report": "medium",
+    "list_report_files": "low",
+    "select_tool_risk_level": "low",
+}
+
+
+def _enforce_tool_risk(tool_name: str) -> None:
+    required = TOOL_RISK_LEVELS.get(tool_name, "high")
+    assert_tool_access(required, tool_name)
+
+
+def select_tool_risk_level(risk_level: Literal["low", "medium", "high"]) -> str:
+    level = set_active_risk_level(risk_level)
+    return json.dumps({"risk_level": level}, ensure_ascii=False, indent=2)
+
 def save_report(
     title: str,
     content: str,
@@ -611,6 +655,7 @@ def save_report(
     folder: str,
     filename: Optional[str] = None,
 ) -> str:
+    _enforce_tool_risk("save_report")
     title_text = title.strip()
     if not title_text:
         raise ValueError("title 不能为空。")
@@ -634,22 +679,19 @@ def save_report(
 
 
 def save_report_file(allowed_folder: str, filename: str, content: str) -> str:
-    target_path = resolve_scoped_path(allowed_folder, filename)
-    before_hash = _sha256_text(target_path.read_text(encoding="utf-8")) if target_path.exists() else None
-    target_path.write_text(content, encoding="utf-8")
-    after_hash = _sha256_text(content)
-    record_audit_event(
-        operation="save_report_file",
-        target_file=target_path.name,
-        allowed_folder=str(target_path.parent),
-        authorization_state="authorized",
-        decision="allow",
-        details={"checksum_before": before_hash, "checksum_after": after_hash},
+    _enforce_tool_risk("save_report_file")
+    return save_report_file_low_risk(
+        allowed_folder,
+        filename,
+        content,
+        resolve_scoped_path=resolve_scoped_path,
+        sha256_text=_sha256_text,
+        record_audit_event=record_audit_event,
     )
-    return f"文件已保存：{target_path}"
 
 
 def read_report_file(allowed_folder: str, filename: str) -> str:
+    _enforce_tool_risk("read_report_file")
     target_path = resolve_scoped_path(allowed_folder, filename)
     if not target_path.exists():
         raise FileNotFoundError(f"文件不存在：{target_path.name}")
@@ -659,27 +701,20 @@ def read_report_file(allowed_folder: str, filename: str) -> str:
 
 
 def edit_report_file(allowed_folder: str, filename: str, content: str) -> str:
-    target_path = resolve_scoped_path(allowed_folder, filename)
-    if not target_path.exists():
-        raise FileNotFoundError(f"文件不存在：{target_path.name}")
-    if not target_path.is_file():
-        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
-    before_text = target_path.read_text(encoding="utf-8")
-    before_hash = _sha256_text(before_text)
-    target_path.write_text(content, encoding="utf-8")
-    after_hash = _sha256_text(content)
-    record_audit_event(
-        operation="edit_report_file",
-        target_file=target_path.name,
-        allowed_folder=str(target_path.parent),
-        authorization_state="authorized",
-        decision="allow",
-        details={"checksum_before": before_hash, "checksum_after": after_hash},
+    _enforce_tool_risk("edit_report_file")
+    return edit_report_file_medium_risk(
+        allowed_folder,
+        filename,
+        content,
+        resolve_scoped_path=resolve_scoped_path,
+        scoped_path_denied_text=SCOPED_PATH_DENIED_TEXT,
+        sha256_text=_sha256_text,
+        record_audit_event=record_audit_event,
     )
-    return f"文件已更新：{target_path}"
 
 
 def read_report(file_name: str, folder: str) -> str:
+    _enforce_tool_risk("read_report")
     target_path = resolve_scoped_path(folder, file_name)
     if not target_path.exists():
         raise FileNotFoundError(f"文件不存在：{target_path.name}")
@@ -715,6 +750,7 @@ def read_report(file_name: str, folder: str) -> str:
 
 
 def edit_report(file_name: str, folder: str, instruction: str, mode: Literal["append", "replace_section", "rewrite"]) -> str:
+    _enforce_tool_risk("edit_report")
     target_path = resolve_scoped_path(folder, file_name)
     if not target_path.exists():
         raise FileNotFoundError(f"文件不存在：{target_path.name}")
@@ -838,6 +874,7 @@ def edit_report(file_name: str, folder: str, instruction: str, mode: Literal["ap
 
 
 def list_report_files(allowed_folder: str) -> str:
+    _enforce_tool_risk("list_report_files")
     report_dir = assert_access_granted_and_scoped(allowed_folder)
     files = sorted(
         [
@@ -866,6 +903,7 @@ TOOL_REGISTRY = {
     "read_report": read_report,
     "edit_report": edit_report,
     "list_report_files": list_report_files,
+    "select_tool_risk_level": select_tool_risk_level,
 }
 
 
@@ -966,4 +1004,13 @@ OPENAI_TOOLS: List[Dict[str, Any]] = [
             "parameters": ListReportFilesArgs.model_json_schema(),
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "select_tool_risk_level",
+            "description": "设置当前会话的工具风险级别（low/medium/high），用于限制可调用工具范围。",
+            "parameters": SelectToolRiskLevelArgs.model_json_schema(),
+        },
+    }
+
 ]
