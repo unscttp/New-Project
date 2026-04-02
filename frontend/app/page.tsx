@@ -32,6 +32,8 @@ type SessionState = {
   allowed_report_folder?: string | null;
 };
 
+type RiskLevel = "low" | "medium" | "high";
+
 type ApprovalRequest = {
   purpose: string;
   folder: string;
@@ -88,6 +90,8 @@ export default function HomePage() {
   const [validationError, setValidationError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [riskLevel, setRiskLevel] = useState<RiskLevel>("high");
+  const [riskUpdating, setRiskUpdating] = useState(false);
 
   useEffect(() => {
     const savedKey = window.localStorage.getItem("deepseek_api_key");
@@ -330,6 +334,76 @@ export default function HomePage() {
     setDenyReason("你已在前端撤销授权。发送下一条消息时会同步到后端会话。");
   }
 
+  async function handleRiskLevelChange(nextRiskLevel: RiskLevel) {
+    if (!apiKey.trim()) {
+      setError("请先填写 DeepSeek API Key，再设置风险级别。");
+      return;
+    }
+    if (loading || riskUpdating) {
+      return;
+    }
+
+    const history = [...messages];
+    const riskMessage: Message = {
+      role: "user",
+      content: `请调用 select_tool_risk_level(risk_level=\"${nextRiskLevel}\") 并确认当前会话工具风险级别。`,
+    };
+
+    setMessages((current) => [...current, riskMessage]);
+    setRiskUpdating(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/agent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          api_key: apiKey.trim(),
+          message: riskMessage.content,
+          history,
+          model: "deepseek-chat",
+          session_id: sessionId,
+          session_state: sessionState,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "风险级别设置失败，请检查后端日志。");
+      }
+
+      setRiskLevel(nextRiskLevel);
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: data.answer || "风险级别已更新。",
+        },
+      ]);
+      setToolLogs(Array.isArray(data.tool_logs) ? data.tool_logs : []);
+      setAuditEntries(Array.isArray(data.audit_entries) ? data.audit_entries : []);
+      if (data.session_state) {
+        setSessionState(data.session_state);
+      }
+      setDenyReason(extractDenyReason(Array.isArray(data.tool_logs) ? data.tool_logs : []));
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "发生未知错误，请稍后再试。";
+      setError(message);
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: `风险级别设置失败：${message}`,
+        },
+      ]);
+    } finally {
+      setRiskUpdating(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#fef3c7,_#fff7ed_35%,_#ffffff_70%)] px-4 py-10 text-slate-900">
       <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -355,6 +429,34 @@ export default function HomePage() {
             >
               revoke access
             </button>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-900">
+            <p className="font-semibold text-indigo-950">风险管理</p>
+            <p className="mt-1 text-indigo-800">
+              low 仅可调用低风险工具；medium 可调用低/中；high 可调用全部。
+            </p>
+            <label className="mt-3 block text-xs font-semibold uppercase tracking-wide">风险级别</label>
+            <div className="mt-2 flex gap-2">
+              {(["low", "medium", "high"] as RiskLevel[]).map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => handleRiskLevelChange(level)}
+                  disabled={loading || riskUpdating}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:opacity-60 ${
+                    riskLevel === level
+                      ? "bg-indigo-600 text-white"
+                      : "border border-indigo-300 bg-white text-indigo-900 hover:bg-indigo-100"
+                  }`}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-indigo-700">
+              当前前端风险级别：<span className="font-mono">{riskLevel}</span>
+            </p>
           </div>
 
           <label className="mt-6 block text-sm font-medium text-slate-700">DeepSeek API Key</label>
@@ -414,7 +516,7 @@ export default function HomePage() {
                 </p>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || riskUpdating}
                   className="rounded-full bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-amber-200"
                 >
                   {loading ? "处理中..." : "发送"}
