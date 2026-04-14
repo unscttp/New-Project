@@ -14,7 +14,10 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 from .low_risk.creation import save_report_file as save_report_file_low_risk
+from .low_risk.skills import extract_keywords as extract_keywords_low_risk
 from .medium_risk.editing import edit_report_file as edit_report_file_medium_risk
+from .medium_risk.skills import redact_sensitive_text as redact_sensitive_text_medium_risk
+from .high_risk.skills import delete_report_file as delete_report_file_high_risk
 from .risk_control import (
     assert_tool_access,
     set_active_risk_level,
@@ -100,6 +103,18 @@ class ListReportFilesArgs(BaseModel):
     allowed_folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
 
 
+class ExtractKeywordsArgs(BaseModel):
+    text: str = Field(..., description="要提取关键词的文本内容。")
+    top_k: int = Field(default=8, description="返回关键词个数，默认 8。")
+
+
+class RedactSensitiveTextArgs(BaseModel):
+    content: str = Field(..., description="需要脱敏处理的文本内容。")
+
+
+class DeleteReportFileArgs(BaseModel):
+    allowed_folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+    filename: str = Field(..., description="要删除的文件名（仅文件名）。")
 
 
 class SelectToolRiskLevelArgs(BaseModel):
@@ -636,6 +651,9 @@ TOOL_RISK_LEVELS: Dict[str, str] = {
     "edit_report": "medium",
     "list_report_files": "low",
     "select_tool_risk_level": "low",
+    "extract_keywords": "low",
+    "redact_sensitive_text": "medium",
+    "delete_report_file": "high",
 }
 
 
@@ -647,6 +665,25 @@ def _enforce_tool_risk(tool_name: str) -> None:
 def select_tool_risk_level(risk_level: Literal["low", "medium", "high"]) -> str:
     level = set_active_risk_level(risk_level)
     return json.dumps({"risk_level": level}, ensure_ascii=False, indent=2)
+
+def extract_keywords(text: str, top_k: int = 8) -> str:
+    _enforce_tool_risk("extract_keywords")
+    return extract_keywords_low_risk(text=text, top_k=top_k)
+
+
+def redact_sensitive_text(content: str) -> str:
+    _enforce_tool_risk("redact_sensitive_text")
+    return redact_sensitive_text_medium_risk(content=content)
+
+
+def delete_report_file(allowed_folder: str, filename: str) -> str:
+    _enforce_tool_risk("delete_report_file")
+    return delete_report_file_high_risk(
+        allowed_folder=allowed_folder,
+        filename=filename,
+        resolve_scoped_path=resolve_scoped_path,
+        record_audit_event=record_audit_event,
+    )
 
 def save_report(
     title: str,
@@ -904,6 +941,9 @@ TOOL_REGISTRY = {
     "edit_report": edit_report,
     "list_report_files": list_report_files,
     "select_tool_risk_level": select_tool_risk_level,
+    "extract_keywords": extract_keywords,
+    "redact_sensitive_text": redact_sensitive_text,
+    "delete_report_file": delete_report_file,
 }
 
 
@@ -1010,6 +1050,30 @@ OPENAI_TOOLS: List[Dict[str, Any]] = [
             "name": "select_tool_risk_level",
             "description": "设置当前会话的工具风险级别（low/medium/high），用于限制可调用工具范围。",
             "parameters": SelectToolRiskLevelArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_keywords",
+            "description": "从输入文本中提取高频关键词，适合快速提炼主题词。",
+            "parameters": ExtractKeywordsArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "redact_sensitive_text",
+            "description": "对文本中的邮箱和手机号进行脱敏处理。",
+            "parameters": RedactSensitiveTextArgs.model_json_schema(),
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_report_file",
+            "description": "删除授权目录中的文件（高风险操作）。",
+            "parameters": DeleteReportFileArgs.model_json_schema(),
         },
     }
 
