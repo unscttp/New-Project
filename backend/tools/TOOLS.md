@@ -16,13 +16,18 @@
 | save_report | Export report in `md`, `docx`, or `pdf`. | low |
 | save_report_file | Save raw report content to a file. | low |
 | read_report_file | Read raw report content from a file. | low |
+| list_report_files | List report files in authorized folder. | low |
+| select_tool_risk_level | Set session risk-level gate (`low`/`medium`/`high`). | low |
+| extract_keywords | Extract top-k keywords from text. | low |
 | edit_report_file | Overwrite an existing report file with updated content. | medium |
 | read_report | Read formatted report content (`md`/`docx`) with metadata. | medium |
 | edit_report | Edit report content with append/rewrite/replace_section modes. | medium |
-| list_report_files | List report files in authorized folder. | low |
-| select_tool_risk_level | Set session risk-level gate (`low`/`medium`/`high`). | low |
+| redact_sensitive_text | Mask emails and phone numbers in free text. | medium |
+| delete_report_file | Delete a report file in the authorized folder. | high |
 
 ## Folder layout
-- `tools/Low risk/creation.py`: low-risk file creation/save logic.
-- `tools/Medium risk/editing.py`: medium-risk file editing logic.
-- `tools/High risk/`: reserved for future high-risk tools.
+- `tools/low_risk/creation.py`: low-risk file creation/save logic.
+- `tools/low_risk/skills.py`: low-risk text processing skills.
+- `tools/medium_risk/editing.py`: medium-risk file editing logic.
+- `tools/medium_risk/skills.py`: medium-risk text transformation skills.
+- `tools/high_risk/skills.py`: high-risk destructive skills.
