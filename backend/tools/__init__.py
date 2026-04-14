@@ -6,18 +6,35 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-import pandas as pd
-from duckduckgo_search import DDGS
 from pydantic import BaseModel, Field
 from docx import Document
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
+from .high_risk.skills import delete_report_file as delete_report_file_high_risk
+from .low_risk.analyze_trend_data import analyze_trend_data as analyze_trend_data_low_risk
+from .low_risk.confirm_report_folder_access import (
+    confirm_report_folder_access as confirm_report_folder_access_low_risk,
+)
 from .low_risk.creation import save_report_file as save_report_file_low_risk
+from .low_risk.generate_markdown_report import (
+    generate_markdown_report as generate_markdown_report_low_risk,
+)
+from .low_risk.list_report_files import list_report_files as list_report_files_low_risk
+from .low_risk.read_report_file import read_report_file as read_report_file_low_risk
+from .low_risk.request_report_folder_access import (
+    request_report_folder_access as request_report_folder_access_low_risk,
+)
+from .low_risk.save_report import save_report as save_report_low_risk
+from .low_risk.search_internet import search_internet as search_internet_low_risk
+from .low_risk.select_tool_risk_level import (
+    select_tool_risk_level as select_tool_risk_level_low_risk,
+)
 from .low_risk.skills import extract_keywords as extract_keywords_low_risk
 from .medium_risk.editing import edit_report_file as edit_report_file_medium_risk
+from .medium_risk.edit_report import edit_report as edit_report_medium_risk
+from .medium_risk.read_report import read_report as read_report_medium_risk
 from .medium_risk.skills import redact_sensitive_text as redact_sensitive_text_medium_risk
-from .high_risk.skills import delete_report_file as delete_report_file_high_risk
 from .risk_control import (
     assert_tool_access,
     set_active_risk_level,
@@ -216,45 +233,11 @@ def _extract_numeric_values(payload: Any) -> List[float]:
 
 
 def search_internet(query: str) -> str:
-    """使用 DuckDuckGo 执行轻量搜索并返回文本摘要。"""
-    query = query.strip()
-    if not query:
-        raise ValueError("query 不能为空。")
-
-    summaries: List[str] = []
-    with DDGS() as ddgs:
-        results = ddgs.text(query, max_results=5)
-        for index, item in enumerate(results, start=1):
-            title = (item.get("title") or "").strip()
-            body = (item.get("body") or "").strip()
-            href = (item.get("href") or "").strip()
-            summaries.append(f"{index}. {title}\n摘要: {body}\n链接: {href}")
-
-    if not summaries:
-        return f"未找到与“{query}”相关的搜索结果。"
-
-    return "\n\n".join(summaries)
+    return search_internet_low_risk(query)
 
 
 def analyze_trend_data(data_json: str) -> str:
-    """对 JSON 中的数值做基础统计。"""
-    try:
-        payload = json.loads(data_json)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"data_json 不是合法 JSON: {exc}") from exc
-
-    values = _extract_numeric_values(payload)
-    if not values:
-        raise ValueError("未从 data_json 中提取到可分析的数值。")
-
-    series = pd.Series(values, dtype="float64")
-    result = {
-        "count": int(series.count()),
-        "mean": round(float(series.mean()), 4),
-        "max": round(float(series.max()), 4),
-        "min": round(float(series.min()), 4),
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return analyze_trend_data_low_risk(data_json, extract_numeric_values=_extract_numeric_values)
 
 
 def _safe_report_path(title: str, report_dir: Path) -> Path:
@@ -563,77 +546,29 @@ def _edit_markdown_content(original: str, instruction: str, mode: str) -> tuple[
 
 
 def request_report_folder_access(purpose: str, folder: str) -> str:
-    purpose_text = purpose.strip()
-    folder_text = folder.strip()
-    if not purpose_text:
-        raise ValueError("purpose 不能为空。")
-    if not folder_text:
-        raise ValueError("folder 不能为空。")
-
-    return json.dumps(
-        {
-            "status": "awaiting_user_confirmation",
-            "purpose": purpose_text,
-            "folder": folder_text,
-            "confirmation_prompt": f"请确认是否授权访问目录：{folder_text}。用途：{purpose_text}",
-            "next_action": "请调用 confirm_report_folder_access(granted, folder) 记录结果。",
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
+    return request_report_folder_access_low_risk(purpose, folder)
 
 
 def confirm_report_folder_access(granted: bool, folder: str) -> str:
-    folder_text = folder.strip()
-    if not folder_text:
-        raise ValueError("folder 不能为空。")
-
-    SESSION_PERMISSION_STATE[ACTIVE_SESSION_ID] = {
-        "file_access_granted": bool(granted),
-        "allowed_report_folder": folder_text if granted else None,
-    }
-    record_audit_event(
-        operation="confirm_report_folder_access",
-        allowed_folder=folder_text,
-        authorization_state="authorized" if granted else "unauthorized",
-        decision="allow" if granted else "deny",
-        error_category=None if granted else ERROR_CATEGORY_PERMISSION_DENIED,
-    )
-    if granted:
-        return json.dumps(
-            {
-                "status": "granted",
-                "file_access_granted": True,
-                "allowed_report_folder": folder_text,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    return json.dumps(
-        {
-            "status": "denied",
-            "file_access_granted": False,
-            "allowed_report_folder": None,
-            "message": UNAUTHORIZED_FILE_ACCESS_TEXT,
-        },
-        ensure_ascii=False,
-        indent=2,
+    return confirm_report_folder_access_low_risk(
+        granted,
+        folder,
+        session_permission_state=SESSION_PERMISSION_STATE,
+        active_session_id=ACTIVE_SESSION_ID,
+        record_audit_event=record_audit_event,
+        unauthorized_file_access_text=UNAUTHORIZED_FILE_ACCESS_TEXT,
+        error_category_permission_denied=ERROR_CATEGORY_PERMISSION_DENIED,
     )
 
 
 def generate_markdown_report(title: str, content: str) -> str:
-    """在授权目录中生成 Markdown 报告，并做路径安全校验。"""
-    if not title.strip():
-        raise ValueError("title 不能为空。")
-
-    state = get_active_permission_state()
-    folder = str(state.get("allowed_report_folder") or "")
-    report_dir = assert_access_granted_and_scoped(folder)
-    report_path = _safe_report_path(title, report_dir)
-    markdown = f"# {title.strip()}\n\n{content.strip()}\n"
-    report_path.write_text(markdown, encoding="utf-8")
-    return f"报告已生成：{report_path}"
+    return generate_markdown_report_low_risk(
+        title,
+        content=content,
+        get_active_permission_state=get_active_permission_state,
+        assert_access_granted_and_scoped=assert_access_granted_and_scoped,
+        safe_report_path=_safe_report_path,
+    )
 
 
 
@@ -663,8 +598,7 @@ def _enforce_tool_risk(tool_name: str) -> None:
 
 
 def select_tool_risk_level(risk_level: Literal["low", "medium", "high"]) -> str:
-    level = set_active_risk_level(risk_level)
-    return json.dumps({"risk_level": level}, ensure_ascii=False, indent=2)
+    return select_tool_risk_level_low_risk(risk_level, set_active_risk_level=set_active_risk_level)
 
 def extract_keywords(text: str, top_k: int = 8) -> str:
     _enforce_tool_risk("extract_keywords")
@@ -693,26 +627,16 @@ def save_report(
     filename: Optional[str] = None,
 ) -> str:
     _enforce_tool_risk("save_report")
-    title_text = title.strip()
-    if not title_text:
-        raise ValueError("title 不能为空。")
-
-    content_text = content.strip()
-    if not content_text:
-        raise ValueError("content 不能为空。")
-
-    target_path = _resolve_report_output_path(folder, title_text, format, filename)
-    if format == "md":
-        markdown = f"# {title_text}\n\n{content_text}\n"
-        target_path.write_text(markdown, encoding="utf-8")
-    elif format == "docx":
-        _write_docx_report(target_path, title_text, content_text)
-    elif format == "pdf":
-        _write_pdf_report(target_path, title_text, content_text)
-    else:
-        raise ValueError("不支持的 format，必须是 md/docx/pdf。")
-
-    return f"报告已导出：{target_path}"
+    return save_report_low_risk(
+        title=title,
+        content=content,
+        format=format,
+        folder=folder,
+        filename=filename,
+        resolve_report_output_path=_resolve_report_output_path,
+        write_docx_report=_write_docx_report,
+        write_pdf_report=_write_pdf_report,
+    )
 
 
 def save_report_file(allowed_folder: str, filename: str, content: str) -> str:
@@ -729,12 +653,12 @@ def save_report_file(allowed_folder: str, filename: str, content: str) -> str:
 
 def read_report_file(allowed_folder: str, filename: str) -> str:
     _enforce_tool_risk("read_report_file")
-    target_path = resolve_scoped_path(allowed_folder, filename)
-    if not target_path.exists():
-        raise FileNotFoundError(f"文件不存在：{target_path.name}")
-    if not target_path.is_file():
-        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
-    return target_path.read_text(encoding="utf-8")
+    return read_report_file_low_risk(
+        allowed_folder=allowed_folder,
+        filename=filename,
+        resolve_scoped_path=resolve_scoped_path,
+        scoped_path_denied_text=SCOPED_PATH_DENIED_TEXT,
+    )
 
 
 def edit_report_file(allowed_folder: str, filename: str, content: str) -> str:
@@ -752,178 +676,40 @@ def edit_report_file(allowed_folder: str, filename: str, content: str) -> str:
 
 def read_report(file_name: str, folder: str) -> str:
     _enforce_tool_risk("read_report")
-    target_path = resolve_scoped_path(folder, file_name)
-    if not target_path.exists():
-        raise FileNotFoundError(f"文件不存在：{target_path.name}")
-    if not target_path.is_file():
-        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
-
-    ext = _ensure_supported_read_extension(target_path)
-    if ext == ".md":
-        content = target_path.read_text(encoding="utf-8")
-        return json.dumps(
-            {
-                "file_name": target_path.name,
-                "format": "md",
-                "line_count": len(content.splitlines()),
-                "content": content,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    doc = Document(target_path)
-    paragraphs = [p.text for p in doc.paragraphs]
-    return json.dumps(
-        {
-            "file_name": target_path.name,
-            "format": "docx",
-            "paragraph_count": len(paragraphs),
-            "content": "\n".join(paragraphs),
-        },
-        ensure_ascii=False,
-        indent=2,
+    return read_report_medium_risk(
+        file_name=file_name,
+        folder=folder,
+        resolve_scoped_path=resolve_scoped_path,
+        scoped_path_denied_text=SCOPED_PATH_DENIED_TEXT,
+        ensure_supported_read_extension=_ensure_supported_read_extension,
     )
 
 
 def edit_report(file_name: str, folder: str, instruction: str, mode: Literal["append", "replace_section", "rewrite"]) -> str:
     _enforce_tool_risk("edit_report")
-    target_path = resolve_scoped_path(folder, file_name)
-    if not target_path.exists():
-        raise FileNotFoundError(f"文件不存在：{target_path.name}")
-    if not target_path.is_file():
-        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
-
-    ext = _ensure_supported_edit_extension(target_path)
-    backup_path = _make_backup(target_path)
-
-    if ext == ".md":
-        original = target_path.read_text(encoding="utf-8")
-        before_hash = _sha256_text(original)
-        new_content, sections, touched_lines = _edit_markdown_content(original, instruction, mode)
-        target_path.write_text(new_content, encoding="utf-8")
-        after_hash = _sha256_text(new_content)
-        summary = {
-            "file_name": target_path.name,
-            "format": "md",
-            "mode": mode,
-            "changed_sections": sections,
-            "line_count_before": len(original.splitlines()),
-            "line_count_after": len(new_content.splitlines()),
-            "touched_line_count": touched_lines,
-            "backup_path": str(backup_path),
-            "checksum_before": before_hash,
-            "checksum_after": after_hash,
-        }
-        record_audit_event(
-            operation="edit_report",
-            target_file=target_path.name,
-            allowed_folder=str(target_path.parent),
-            authorization_state="authorized",
-            decision="allow",
-            details={
-                "mode": mode,
-                "changed_sections": sections,
-                "checksum_before": before_hash,
-                "checksum_after": after_hash,
-            },
-        )
-        return json.dumps(summary, ensure_ascii=False, indent=2)
-
-    doc = Document(target_path)
-    before_hash = _sha256_bytes(target_path.read_bytes())
-    changed_sections: List[str] = []
-    paragraph_count_before = len(doc.paragraphs)
-    touched_paragraphs = 0
-
-    if mode == "append":
-        append_text = instruction.strip()
-        if not append_text:
-            raise ValueError("append 模式下 instruction 不能为空。")
-        for line in append_text.splitlines():
-            doc.add_paragraph(line)
-            touched_paragraphs += 1
-        changed_sections = ["__appended__"]
-    elif mode == "rewrite":
-        for _ in range(len(doc.paragraphs)):
-            p = doc.paragraphs[0]._element
-            p.getparent().remove(p)
-        for line in instruction.strip().splitlines():
-            doc.add_paragraph(line)
-            touched_paragraphs += 1
-        changed_sections = ["__all__"]
-    else:
-        section_name, replacement = _parse_replace_instruction(instruction)
-        replacement_lines = replacement.splitlines()
-        start_idx = None
-        for idx, paragraph in enumerate(doc.paragraphs):
-            if paragraph.text.strip().lower() == section_name.lower():
-                start_idx = idx
-                break
-        if start_idx is None:
-            raise ValueError(f"未找到 DOCX 段落标题：{section_name}")
-        end_idx = len(doc.paragraphs)
-        for idx in range(start_idx + 1, len(doc.paragraphs)):
-            if doc.paragraphs[idx].style and str(doc.paragraphs[idx].style.name).lower().startswith("heading"):
-                end_idx = idx
-                break
-        anchor = doc.paragraphs[start_idx]._element
-        for _ in range(end_idx - start_idx - 1):
-            nxt = anchor.getnext()
-            if nxt is not None:
-                nxt.getparent().remove(nxt)
-                touched_paragraphs += 1
-        for line in replacement_lines:
-            new_para = doc.add_paragraph(line)
-            anchor.addnext(new_para._element)
-            anchor = new_para._element
-            touched_paragraphs += 1
-        changed_sections = [section_name]
-
-    doc.save(target_path)
-    after_hash = _sha256_bytes(target_path.read_bytes())
-    summary = {
-        "file_name": target_path.name,
-        "format": "docx",
-        "mode": mode,
-        "changed_sections": changed_sections,
-        "paragraph_count_before": paragraph_count_before,
-        "paragraph_count_after": len(Document(target_path).paragraphs),
-        "touched_paragraph_count": touched_paragraphs,
-        "backup_path": str(backup_path),
-        "checksum_before": before_hash,
-        "checksum_after": after_hash,
-    }
-    record_audit_event(
-        operation="edit_report",
-        target_file=target_path.name,
-        allowed_folder=str(target_path.parent),
-        authorization_state="authorized",
-        decision="allow",
-        details={
-            "mode": mode,
-            "changed_sections": changed_sections,
-            "checksum_before": before_hash,
-            "checksum_after": after_hash,
-        },
+    return edit_report_medium_risk(
+        file_name=file_name,
+        folder=folder,
+        instruction=instruction,
+        mode=mode,
+        resolve_scoped_path=resolve_scoped_path,
+        scoped_path_denied_text=SCOPED_PATH_DENIED_TEXT,
+        ensure_supported_edit_extension=_ensure_supported_edit_extension,
+        make_backup=_make_backup,
+        sha256_text=_sha256_text,
+        sha256_bytes=_sha256_bytes,
+        edit_markdown_content=_edit_markdown_content,
+        parse_replace_instruction=_parse_replace_instruction,
+        record_audit_event=record_audit_event,
     )
-    return json.dumps(summary, ensure_ascii=False, indent=2)
 
 
 def list_report_files(allowed_folder: str) -> str:
     _enforce_tool_risk("list_report_files")
-    report_dir = assert_access_granted_and_scoped(allowed_folder)
-    files = sorted(
-        [
-            item.name
-            for item in report_dir.iterdir()
-            if item.is_file() and item.suffix.lower() in ALLOWED_REPORT_EXTENSIONS
-        ]
-    )
-    return json.dumps(
-        {"allowed_folder": str(report_dir), "files": files},
-        ensure_ascii=False,
-        indent=2,
+    return list_report_files_low_risk(
+        allowed_folder=allowed_folder,
+        assert_access_granted_and_scoped=assert_access_granted_and_scoped,
+        allowed_report_extensions=ALLOWED_REPORT_EXTENSIONS,
     )
 
 
