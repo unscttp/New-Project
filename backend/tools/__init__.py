@@ -11,7 +11,7 @@ from docx import Document
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-from .high_risk.skills import delete_report_file as delete_report_file_high_risk
+from .high_risk.delete_report_file import delete_report_file as delete_report_file_high_risk
 from .low_risk.analyze_trend_data import analyze_trend_data as analyze_trend_data_low_risk
 from .low_risk.confirm_report_folder_access import (
     confirm_report_folder_access as confirm_report_folder_access_low_risk,
@@ -30,11 +30,11 @@ from .low_risk.search_internet import search_internet as search_internet_low_ris
 from .low_risk.select_tool_risk_level import (
     select_tool_risk_level as select_tool_risk_level_low_risk,
 )
-from .low_risk.skills import extract_keywords as extract_keywords_low_risk
+from .low_risk.extract_keywords import extract_keywords as extract_keywords_low_risk
 from .medium_risk.editing import edit_report_file as edit_report_file_medium_risk
 from .medium_risk.edit_report import edit_report as edit_report_medium_risk
 from .medium_risk.read_report import read_report as read_report_medium_risk
-from .medium_risk.skills import redact_sensitive_text as redact_sensitive_text_medium_risk
+from .medium_risk.redact_sensitive_text import redact_sensitive_text as redact_sensitive_text_medium_risk
 from .risk_control import (
     assert_tool_access,
     set_active_risk_level,
