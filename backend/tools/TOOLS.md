@@ -27,7 +27,7 @@
 
 ## Folder layout
 - `tools/low_risk/creation.py`: low-risk file creation/save logic.
-- `tools/low_risk/skills.py`: low-risk text processing skills.
+- `tools/low_risk/extract_keywords.py`: low-risk text processing skills.
 - `tools/medium_risk/editing.py`: medium-risk file editing logic.
-- `tools/medium_risk/skills.py`: medium-risk text transformation skills.
-- `tools/high_risk/skills.py`: high-risk destructive skills.
+- `tools/medium_risk/redact_sensitive_text.py`: medium-risk text transformation skills.
+- `tools/high_risk/delete_report_file.py`: high-risk destructive skills.
