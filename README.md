@@ -44,3 +44,9 @@ This repository hosts a lightweight AI Agent MVP with a web chat interface, a Fa
 - Keep this file synchronized with actual folder layout and runtime entrypoints.
 - When adding/removing top-level modules, update the architecture map in the same PR.
 - Prefer incremental, dated notes in PR descriptions for operational changes affecting setup.
+
+## 7. Naming conventions
+- Use one tool function per file where practical.
+- Tool module filenames should mirror the primary function name they implement.
+- Avoid catch-all names like `skills.py`, `helpers.py`, or `misc.py` for tool modules.
+- Any tool module rename must include corresponding import updates in `backend/tools/__init__.py` and documentation updates in `backend/tools/TOOLS.md`.
