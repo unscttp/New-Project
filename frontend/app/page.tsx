@@ -8,11 +8,39 @@ type Message = {
 };
 
 type ToolLog = {
+  timestamp: string;
   tool_name: string;
   arguments: Record<string, unknown>;
   output: string;
   success: boolean;
+  error_category?: "permission_denied" | "path_violation" | "format_unsupported" | "io_failure" | null;
 };
+
+type AuditEntry = {
+  timestamp: string;
+  operation: string;
+  target_file?: string | null;
+  allowed_folder?: string | null;
+  authorization_state: string;
+  decision: string;
+  error_category?: "permission_denied" | "path_violation" | "format_unsupported" | "io_failure" | null;
+  summary: string;
+};
+
+type SessionState = {
+  file_access_granted: boolean;
+  allowed_report_folder?: string | null;
+};
+
+type RiskLevel = "low" | "medium" | "high";
+
+type ApprovalRequest = {
+  purpose: string;
+  folder: string;
+};
+
+type OperationType = "save" | "edit" | "review";
+type FileFormat = "md" | "docx" | "pdf";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
@@ -37,6 +65,11 @@ function isNetworkError(error: unknown): boolean {
 }
 
 export default function HomePage() {
+  const [sessionId, setSessionId] = useState("default");
+  const [sessionState, setSessionState] = useState<SessionState>({
+    file_access_granted: false,
+    allowed_report_folder: null,
+  });
   const [apiKey, setApiKey] = useState("");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([
@@ -47,11 +80,29 @@ export default function HomePage() {
     },
   ]);
   const [toolLogs, setToolLogs] = useState<ToolLog[]>([]);
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
+  const [approvalFolder, setApprovalFolder] = useState("");
+  const [approvalFilename, setApprovalFilename] = useState("");
+  const [approvalOperation, setApprovalOperation] = useState<OperationType>("save");
+  const [approvalFormat, setApprovalFormat] = useState<FileFormat>("md");
+  const [denyReason, setDenyReason] = useState("");
+  const [validationError, setValidationError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [riskLevel, setRiskLevel] = useState<RiskLevel>("high");
+  const [riskUpdating, setRiskUpdating] = useState(false);
 
   useEffect(() => {
     const savedKey = window.localStorage.getItem("deepseek_api_key");
+    const savedSessionId = window.localStorage.getItem("agent_session_id");
+    if (savedSessionId) {
+      setSessionId(savedSessionId);
+    } else {
+      const nextId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}`;
+      window.localStorage.setItem("agent_session_id", nextId);
+      setSessionId(nextId);
+    }
     if (savedKey) {
       setApiKey(savedKey);
     }
@@ -65,6 +116,59 @@ export default function HomePage() {
     }
   }, [apiKey]);
 
+  function extractPendingApproval(logs: ToolLog[]): ApprovalRequest | null {
+    const requestLog = [...logs].reverse().find((item) => item.tool_name === "request_report_folder_access");
+    if (!requestLog?.success) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(requestLog.output) as {
+        status?: string;
+        purpose?: string;
+        folder?: string;
+      };
+      if (parsed.status === "awaiting_user_confirmation" && parsed.folder) {
+        return {
+          purpose: parsed.purpose || "文件操作",
+          folder: parsed.folder,
+        };
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  function extractDenyReason(logs: ToolLog[]): string {
+    const latestDenied = [...logs].reverse().find((item) => !item.success && item.error_category);
+    if (!latestDenied) {
+      return "";
+    }
+    if (latestDenied.error_category === "permission_denied") {
+      return `权限被拒绝：${latestDenied.output}`;
+    }
+    if (latestDenied.error_category === "path_violation") {
+      return `路径校验失败：${latestDenied.output}`;
+    }
+    if (latestDenied.error_category === "format_unsupported") {
+      return `文件格式不支持：${latestDenied.output}`;
+    }
+    return `工具执行失败：${latestDenied.output}`;
+  }
+
+  function validateApprovalFields(folder: string, filename: string): string {
+    if (!folder.trim()) {
+      return "目录不能为空。";
+    }
+    if (folder.includes("..")) {
+      return "目录中不能包含 ..。";
+    }
+    if (filename.trim() && !/^[\w.\-]+$/.test(filename.trim())) {
+      return "文件名仅允许字母、数字、下划线、中划线和点。";
+    }
+    return "";
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!apiKey.trim()) {
@@ -73,6 +177,10 @@ export default function HomePage() {
     }
     if (!input.trim()) {
       setError("请输入消息内容。");
+      return;
+    }
+    if (pendingApproval) {
+      setError("请先在授权卡片中选择允许或拒绝，再继续发送任务。");
       return;
     }
 
@@ -95,6 +203,8 @@ export default function HomePage() {
           message: userMessage.content,
           history,
           model: "deepseek-chat",
+          session_id: sessionId,
+          session_state: sessionState,
         }),
       });
 
@@ -111,6 +221,17 @@ export default function HomePage() {
         },
       ]);
       setToolLogs(Array.isArray(data.tool_logs) ? data.tool_logs : []);
+      setAuditEntries(Array.isArray(data.audit_entries) ? data.audit_entries : []);
+      if (data.session_state) {
+        setSessionState(data.session_state);
+      }
+      const logs = Array.isArray(data.tool_logs) ? data.tool_logs : [];
+      const nextPending = extractPendingApproval(logs);
+      setPendingApproval(nextPending);
+      if (nextPending) {
+        setApprovalFolder(nextPending.folder);
+      }
+      setDenyReason(extractDenyReason(logs));
     } catch (requestError) {
       const message =
         requestError instanceof Error ? requestError.message : "发生未知错误，请稍后再试。";
@@ -131,6 +252,158 @@ export default function HomePage() {
     }
   }
 
+  async function handleApprovalDecision(granted: boolean) {
+    if (!pendingApproval || loading) {
+      return;
+    }
+    const validation = validateApprovalFields(approvalFolder, approvalFilename);
+    if (validation) {
+      setValidationError(validation);
+      return;
+    }
+    setValidationError("");
+    const message = [
+      granted ? "我同意授权该目录。" : "我拒绝本次目录授权。",
+      `请调用 confirm_report_folder_access(granted=${granted ? "true" : "false"}, folder="${approvalFolder}")。`,
+      `本次意图操作：${approvalOperation}`,
+      `文件格式：${approvalFormat}`,
+      `目标文件名：${approvalFilename || "未指定"}`,
+    ].join("\n");
+    const history = [...messages];
+    const approvalMessage: Message = { role: "user", content: message };
+    setMessages((current) => [...current, approvalMessage]);
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/agent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          api_key: apiKey.trim(),
+          message: approvalMessage.content,
+          history,
+          model: "deepseek-chat",
+          session_id: sessionId,
+          session_state: {
+            file_access_granted: false,
+            allowed_report_folder: null,
+          },
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "请求失败，请检查后端日志。");
+      }
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: data.answer || "模型没有返回结果。",
+        },
+      ]);
+      const logs = Array.isArray(data.tool_logs) ? data.tool_logs : [];
+      setToolLogs(logs);
+      setAuditEntries(Array.isArray(data.audit_entries) ? data.audit_entries : []);
+      if (data.session_state) {
+        setSessionState(data.session_state);
+      }
+      const nextPending = extractPendingApproval(logs);
+      setPendingApproval(nextPending);
+      if (!nextPending) {
+        setApprovalFilename("");
+      }
+      setDenyReason(extractDenyReason(logs));
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "发生未知错误，请稍后再试。";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function revokeAccess() {
+    setSessionState({
+      file_access_granted: false,
+      allowed_report_folder: null,
+    });
+    setPendingApproval(null);
+    setDenyReason("你已在前端撤销授权。发送下一条消息时会同步到后端会话。");
+  }
+
+  async function handleRiskLevelChange(nextRiskLevel: RiskLevel) {
+    if (!apiKey.trim()) {
+      setError("请先填写 DeepSeek API Key，再设置风险级别。");
+      return;
+    }
+    if (loading || riskUpdating) {
+      return;
+    }
+
+    const history = [...messages];
+    const riskMessage: Message = {
+      role: "user",
+      content: `请调用 select_tool_risk_level(risk_level=\"${nextRiskLevel}\") 并确认当前会话工具风险级别。`,
+    };
+
+    setMessages((current) => [...current, riskMessage]);
+    setRiskUpdating(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/agent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          api_key: apiKey.trim(),
+          message: riskMessage.content,
+          history,
+          model: "deepseek-chat",
+          session_id: sessionId,
+          session_state: sessionState,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "风险级别设置失败，请检查后端日志。");
+      }
+
+      setRiskLevel(nextRiskLevel);
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: data.answer || "风险级别已更新。",
+        },
+      ]);
+      setToolLogs(Array.isArray(data.tool_logs) ? data.tool_logs : []);
+      setAuditEntries(Array.isArray(data.audit_entries) ? data.audit_entries : []);
+      if (data.session_state) {
+        setSessionState(data.session_state);
+      }
+      setDenyReason(extractDenyReason(Array.isArray(data.tool_logs) ? data.tool_logs : []));
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "发生未知错误，请稍后再试。";
+      setError(message);
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: `风险级别设置失败：${message}`,
+        },
+      ]);
+    } finally {
+      setRiskUpdating(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#fef3c7,_#fff7ed_35%,_#ffffff_70%)] px-4 py-10 text-slate-900">
       <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -142,6 +415,49 @@ export default function HomePage() {
           <p className="mt-3 text-sm leading-6 text-slate-600">
             API Key 仅保存在浏览器本地，发请求时会以 BYOK 模式传给 FastAPI 后端。
           </p>
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700">
+            <p className="font-semibold text-slate-900">当前会话授权目录</p>
+            <p className="mt-1 font-mono">
+              {sessionState.file_access_granted && sessionState.allowed_report_folder
+                ? sessionState.allowed_report_folder
+                : "未授权"}
+            </p>
+            <button
+              type="button"
+              onClick={revokeAccess}
+              className="mt-3 rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+            >
+              revoke access
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-900">
+            <p className="font-semibold text-indigo-950">风险管理</p>
+            <p className="mt-1 text-indigo-800">
+              low 仅可调用低风险工具；medium 可调用低/中；high 可调用全部。
+            </p>
+            <label className="mt-3 block text-xs font-semibold uppercase tracking-wide">风险级别</label>
+            <div className="mt-2 flex gap-2">
+              {(["low", "medium", "high"] as RiskLevel[]).map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => handleRiskLevelChange(level)}
+                  disabled={loading || riskUpdating}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:opacity-60 ${
+                    riskLevel === level
+                      ? "bg-indigo-600 text-white"
+                      : "border border-indigo-300 bg-white text-indigo-900 hover:bg-indigo-100"
+                  }`}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-indigo-700">
+              当前前端风险级别：<span className="font-mono">{riskLevel}</span>
+            </p>
+          </div>
 
           <label className="mt-6 block text-sm font-medium text-slate-700">DeepSeek API Key</label>
           <textarea
@@ -200,7 +516,7 @@ export default function HomePage() {
                 </p>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || riskUpdating}
                   className="rounded-full bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-amber-200"
                 >
                   {loading ? "处理中..." : "发送"}
@@ -211,6 +527,81 @@ export default function HomePage() {
             {error && (
               <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {error}
+              </div>
+            )}
+
+            {pendingApproval && (
+              <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+                <p className="font-semibold">需要你确认目录授权</p>
+                <p className="mt-1 text-xs text-amber-800">用途：{pendingApproval.purpose}</p>
+                <label className="mt-3 block text-xs font-semibold uppercase tracking-wide">目标目录</label>
+                <input
+                  value={approvalFolder}
+                  onChange={(event) => setApprovalFolder(event.target.value)}
+                  className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-amber-500"
+                />
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide">操作类型</label>
+                    <select
+                      value={approvalOperation}
+                      onChange={(event) => setApprovalOperation(event.target.value as OperationType)}
+                      className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs text-slate-800 outline-none"
+                    >
+                      <option value="save">save</option>
+                      <option value="edit">edit</option>
+                      <option value="review">review</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide">文件格式</label>
+                    <select
+                      value={approvalFormat}
+                      onChange={(event) => setApprovalFormat(event.target.value as FileFormat)}
+                      className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs text-slate-800 outline-none"
+                    >
+                      <option value="md">md</option>
+                      <option value="docx">docx</option>
+                      <option value="pdf">pdf</option>
+                    </select>
+                  </div>
+                </div>
+                <label className="mt-3 block text-xs font-semibold uppercase tracking-wide">
+                  文件名（可选）
+                </label>
+                <input
+                  value={approvalFilename}
+                  onChange={(event) => setApprovalFilename(event.target.value)}
+                  placeholder="summary.md"
+                  className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-amber-500"
+                />
+                {validationError && <p className="mt-2 text-xs text-red-700">{validationError}</p>}
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApprovalDecision(true)}
+                    disabled={loading}
+                    className="rounded-full bg-emerald-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    allow
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApprovalDecision(false)}
+                    disabled={loading}
+                    className="rounded-full bg-red-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  >
+                    deny
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {denyReason && (
+              <div className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+                <p className="font-semibold">后端拒绝原因</p>
+                <p className="mt-1">{denyReason}</p>
+                <p className="mt-1 text-xs">请重新授权目录后再执行文件相关操作。</p>
               </div>
             )}
 
@@ -244,6 +635,43 @@ export default function HomePage() {
                         {JSON.stringify(log.arguments, null, 2)}
                       </pre>
                       <pre className="mt-3 whitespace-pre-wrap text-sm text-slate-700">{log.output}</pre>
+                      {log.error_category && (
+                        <p className="mt-2 text-xs font-medium text-red-600">
+                          error_category: {log.error_category}
+                        </p>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-700">
+                  Audit Trail
+                </h2>
+                <span className="text-xs text-slate-400">{auditEntries.length} 条</span>
+              </div>
+              <div className="mt-3 space-y-3">
+                {auditEntries.length === 0 ? (
+                  <p className="text-sm text-slate-500">暂无审计记录。</p>
+                ) : (
+                  auditEntries.map((entry, index) => (
+                    <div key={`${entry.timestamp}-${index}`} className="rounded-2xl bg-white p-4 shadow-sm">
+                      <p className="text-xs text-slate-500">{entry.timestamp}</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">{entry.summary}</p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        state: {entry.authorization_state} / decision: {entry.decision}
+                      </p>
+                      {entry.target_file && (
+                        <p className="mt-1 text-xs text-slate-600">file: {entry.target_file}</p>
+                      )}
+                      {entry.error_category && (
+                        <p className="mt-1 text-xs font-medium text-red-600">
+                          error_category: {entry.error_category}
+                        </p>
+                      )}
                     </div>
                   ))
                 )}
