@@ -1,4 +1,4 @@
-# New Project
+# Simple Workflow
 
 ## 1. Purpose
 This repository hosts a lightweight AI Agent MVP with a web chat interface, a FastAPI backend, and an optional Snake easter egg fallback.
