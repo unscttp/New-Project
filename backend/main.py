@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from backend.tools import OPENAI_TOOLS, TOOL_REGISTRY, get_active_audit_entries, get_active_permission_state, set_active_session
+from tools import OPENAI_TOOLS, TOOL_REGISTRY, get_active_audit_entries, get_active_permission_state, set_active_session
 
 
 PROMPT_FILE = Path(__file__).resolve().parent / "prompts" / "system_prompt.md"
