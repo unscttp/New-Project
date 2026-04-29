@@ -43,7 +43,7 @@ type OperationType = "save" | "edit" | "review";
 type FileFormat = "md" | "docx" | "pdf";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000";
 const NETWORK_FALLBACK_MESSAGE = "网络出现问题，需要玩一会贪吃蛇来等待一下吗？";
 
 function isNetworkError(error: unknown): boolean {
