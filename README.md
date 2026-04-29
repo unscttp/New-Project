@@ -19,6 +19,12 @@ This repository hosts a lightweight AI Agent MVP with a web chat interface, a Fa
 - Node.js 18+ and npm/pnpm (frontend runtime)
 - Access to required model/API credentials via environment variables (project-local `.env` as applicable)
 
+
+### Local development ports
+- Frontend dev server: `http://localhost:3000` (Next.js default)
+- Backend API server: `http://localhost:8000` (FastAPI/Uvicorn)
+- Frontend API target: set `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` (defaults to this value).
+
 ### API entrypoints
 - Backend service root: FastAPI app in `backend/` (run according to backend server command in project scripts).
 - Core chat/API routes: exposed by the backend FastAPI router layer in `backend/`.
