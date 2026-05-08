@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "search_internet",
+      "risk_level": "low",
+      "args_model": "SearchInternetArgs",
+      "description": "搜索互联网公开信息，返回轻量级文本摘要列表。"
+    },
+    {
+      "name": "analyze_trend_data",
+      "risk_level": "low",
+      "args_model": "AnalyzeTrendDataArgs",
+      "description": "对 JSON 数值数据做基础统计分析，返回均值、最大值、最小值等结果。"
+    },
+    {
+      "name": "request_report_folder_access",
+      "risk_level": "low",
+      "args_model": "RequestReportFolderAccessArgs",
+      "description": "申请访问报告目录，仅记录授权意图并返回确认提示，不执行任何文件写入。"
+    },
+    {
+      "name": "confirm_report_folder_access",
+      "risk_level": "low",
+      "args_model": "ConfirmReportFolderAccessArgs",
+      "description": "记录用户对报告目录访问授权的确认结果，持久化到当前会话状态。"
+    },
+    {
+      "name": "generate_markdown_report",
+      "risk_level": "low",
+      "args_model": "GenerateMarkdownReportArgs",
+      "description": "把给定标题和内容保存为 Markdown 报告到已授权目录。"
+    },
+    {
+      "name": "save_report",
+      "risk_level": "low",
+      "args_model": "SaveReportArgs",
+      "description": "在已授权目录导出报告为 md/docx/pdf；调用前必须完成 request_report_folder_access + confirm_report_folder_access，并将 folder 设为已授权目录。"
+    },
+    {
+      "name": "save_report_file",
+      "risk_level": "low",
+      "args_model": "SaveReportFileArgs",
+      "description": "在授权目录内按文件名保存报告内容，拒绝任意路径输入。"
+    },
+    {
+      "name": "read_report_file",
+      "risk_level": "low",
+      "args_model": "ReadReportFileArgs",
+      "description": "在授权目录内按文件名读取报告内容，拒绝任意路径输入。"
+    },
+    {
+      "name": "edit_report_file",
+      "risk_level": "medium",
+      "args_model": "EditReportFileArgs",
+      "description": "在授权目录内按文件名覆盖编辑报告内容，拒绝任意路径输入。"
+    },
+    {
+      "name": "read_report",
+      "risk_level": "medium",
+      "args_model": "ReadReportArgs",
+      "description": "读取授权目录中的 .md/.docx 报告内容（MVP 不支持 PDF 正文读取）。"
+    },
+    {
+      "name": "edit_report",
+      "risk_level": "medium",
+      "args_model": "EditReportArgs",
+      "description": "编辑授权目录中的 .md/.docx 报告，支持 append/replace_section/rewrite，并自动创建同目录备份。"
+    },
+    {
+      "name": "list_report_files",
+      "risk_level": "low",
+      "args_model": "ListReportFilesArgs",
+      "description": "仅列出授权目录内 .md/.docx/.pdf 文件名。"
+    },
+    {
+      "name": "select_tool_risk_level",
+      "risk_level": "low",
+      "args_model": "SelectToolRiskLevelArgs",
+      "description": "设置当前会话的工具风险级别（low/medium/high），用于限制可调用工具范围。"
+    },
+    {
+      "name": "extract_keywords",
+      "risk_level": "low",
+      "args_model": "ExtractKeywordsArgs",
+      "description": "从输入文本中提取高频关键词，适合快速提炼主题词。"
+    },
+    {
+      "name": "redact_sensitive_text",
+      "risk_level": "medium",
+      "args_model": "RedactSensitiveTextArgs",
+      "description": "对文本中的邮箱和手机号进行脱敏处理。"
+    },
+    {
+      "name": "delete_report_file",
+      "risk_level": "high",
+      "args_model": "DeleteReportFileArgs",
+      "description": "删除授权目录中的文件（高风险操作）。"
+    }
+  ]
+}
