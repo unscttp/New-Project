@@ -2,6 +2,7 @@ import json
 import re
 import shutil
 import hashlib
+import importlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -713,154 +714,51 @@ def list_report_files(allowed_folder: str) -> str:
     )
 
 
-TOOL_REGISTRY = {
-    "search_internet": search_internet,
-    "analyze_trend_data": analyze_trend_data,
-    "request_report_folder_access": request_report_folder_access,
-    "confirm_report_folder_access": confirm_report_folder_access,
-    "generate_markdown_report": generate_markdown_report,
-    "save_report": save_report,
-    "save_report_file": save_report_file,
-    "read_report_file": read_report_file,
-    "edit_report_file": edit_report_file,
-    "read_report": read_report,
-    "edit_report": edit_report,
-    "list_report_files": list_report_files,
-    "select_tool_risk_level": select_tool_risk_level,
-    "extract_keywords": extract_keywords,
-    "redact_sensitive_text": redact_sensitive_text,
-    "delete_report_file": delete_report_file,
-}
+TOOL_REGISTRY_CONFIG_PATH = BASE_DIR / "tool_registry.json"
 
 
-OPENAI_TOOLS: List[Dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_internet",
-            "description": "搜索互联网公开信息，返回轻量级文本摘要列表。",
-            "parameters": SearchInternetArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "analyze_trend_data",
-            "description": "对 JSON 数值数据做基础统计分析，返回均值、最大值、最小值等结果。",
-            "parameters": AnalyzeTrendDataArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "request_report_folder_access",
-            "description": "申请访问报告目录，仅记录授权意图并返回确认提示，不执行任何文件写入。",
-            "parameters": RequestReportFolderAccessArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "confirm_report_folder_access",
-            "description": "记录用户对报告目录访问授权的确认结果，持久化到当前会话状态。",
-            "parameters": ConfirmReportFolderAccessArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "generate_markdown_report",
-            "description": "把给定标题和内容保存为 Markdown 报告到已授权目录。",
-            "parameters": GenerateMarkdownReportArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "save_report",
-            "description": "在已授权目录导出报告为 md/docx/pdf；调用前必须完成 request_report_folder_access + confirm_report_folder_access，并将 folder 设为已授权目录。",
-            "parameters": SaveReportArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "save_report_file",
-            "description": "在授权目录内按文件名保存报告内容，拒绝任意路径输入。",
-            "parameters": SaveReportFileArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_report_file",
-            "description": "在授权目录内按文件名读取报告内容，拒绝任意路径输入。",
-            "parameters": ReadReportFileArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_report_file",
-            "description": "在授权目录内按文件名覆盖编辑报告内容，拒绝任意路径输入。",
-            "parameters": EditReportFileArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_report",
-            "description": "读取授权目录中的 .md/.docx 报告内容（MVP 不支持 PDF 正文读取）。",
-            "parameters": ReadReportArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_report",
-            "description": "编辑授权目录中的 .md/.docx 报告，支持 append/replace_section/rewrite，并自动创建同目录备份。",
-            "parameters": EditReportArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_report_files",
-            "description": "仅列出授权目录内 .md/.docx/.pdf 文件名。",
-            "parameters": ListReportFilesArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "select_tool_risk_level",
-            "description": "设置当前会话的工具风险级别（low/medium/high），用于限制可调用工具范围。",
-            "parameters": SelectToolRiskLevelArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "extract_keywords",
-            "description": "从输入文本中提取高频关键词，适合快速提炼主题词。",
-            "parameters": ExtractKeywordsArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "redact_sensitive_text",
-            "description": "对文本中的邮箱和手机号进行脱敏处理。",
-            "parameters": RedactSensitiveTextArgs.model_json_schema(),
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "delete_report_file",
-            "description": "删除授权目录中的文件（高风险操作）。",
-            "parameters": DeleteReportFileArgs.model_json_schema(),
-        },
-    }
+def _load_tool_registry_config() -> List[Dict[str, Any]]:
+    raw = json.loads(TOOL_REGISTRY_CONFIG_PATH.read_text(encoding="utf-8"))
+    tools = raw.get("tools", [])
+    if not isinstance(tools, list):
+        raise ValueError("tool_registry.json 的 tools 字段必须为列表")
+    return tools
 
-]
+
+def _resolve_object(import_path: str) -> Any:
+    if ":" not in import_path:
+        raise ValueError(f"导入路径格式错误: {import_path}，应为 module.path:object_name")
+    module_path, object_name = import_path.split(":", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, object_name)
+
+
+def _build_tool_registry(tool_specs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    registry: Dict[str, Any] = {}
+    for spec in tool_specs:
+        name = spec["name"]
+        registry[name] = _resolve_object(spec["callable_path"])
+    return registry
+
+
+def _build_openai_tools(tool_specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    payload: List[Dict[str, Any]] = []
+    for spec in tool_specs:
+        args_model = _resolve_object(spec["args_model_path"])
+        payload.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": spec["name"],
+                    "description": spec["description"],
+                    "parameters": args_model.model_json_schema(),
+                },
+            }
+        )
+    return payload
+
+
+_TOOL_SPECS = _load_tool_registry_config()
+TOOL_REGISTRY = _build_tool_registry(_TOOL_SPECS)
+OPENAI_TOOLS: List[Dict[str, Any]] = _build_openai_tools(_TOOL_SPECS)
+
