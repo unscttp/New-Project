@@ -10,7 +10,7 @@ Define the backend tool catalog, risk model, and maintenance rules for tool gove
 
 ## 3. Inputs/Outputs (Interfaces)
 ### Source of truth
-Tool names documented here **must exactly match** the `TOOL_REGISTRY` keys in `backend/tools/__init__.py`. If there is any conflict, `TOOL_REGISTRY` is authoritative and this document must be updated immediately.
+Tool names documented here **must exactly match** `backend/tools/tool_registry.json` entries. Runtime `TOOL_REGISTRY` in `backend/tools/__init__.py` is generated from that JSON; update this document in the same change.
 
 ### Risk-level policy
 - `low`: can use only Low risk tools.
@@ -50,8 +50,8 @@ Tool names documented here **must exactly match** the `TOOL_REGISTRY` keys in `b
 - Avoid introducing undocumented tools; add both implementation and docs in the same change.
 
 ## 5. Examples
-- **Adding a tool**: implement tool, register in `TOOL_REGISTRY`, then append row in the Tools table.
-- **Renaming a tool**: update `TOOL_REGISTRY` key first, then update all prompt/tool references and this document.
+- **Adding a tool**: implement tool, then run `python backend/tools/tool_creation.py ...` to update `tool_registry.json`, and append row in the Tools table.
+- **Renaming a tool**: update callable name + JSON entry, then update all prompt/tool references and this document.
 - **Risk escalation**: if tool gains write/delete behavior, re-evaluate and potentially move from `low` to `medium`/`high`.
 
 ## 6. Change log / maintenance notes
