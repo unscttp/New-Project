@@ -573,24 +573,21 @@ def generate_markdown_report(title: str, content: str) -> str:
 
 
 
-TOOL_RISK_LEVELS: Dict[str, str] = {
-    "search_internet": "low",
-    "analyze_trend_data": "low",
-    "request_report_folder_access": "low",
-    "confirm_report_folder_access": "low",
-    "generate_markdown_report": "low",
-    "save_report": "low",
-    "save_report_file": "low",
-    "read_report_file": "low",
-    "edit_report_file": "medium",
-    "read_report": "medium",
-    "edit_report": "medium",
-    "list_report_files": "low",
-    "select_tool_risk_level": "low",
-    "extract_keywords": "low",
-    "redact_sensitive_text": "medium",
-    "delete_report_file": "high",
-}
+
+
+
+
+def _build_tool_risk_levels(tool_specs: List[Dict[str, Any]]) -> Dict[str, str]:
+    levels: Dict[str, str] = {}
+    for spec in tool_specs:
+        name = str(spec.get("name", "")).strip()
+        risk_level = str(spec.get("risk_level", "")).strip().lower()
+        if not name:
+            raise ValueError("tool_registry.json 中存在缺少 name 的工具配置")
+        if risk_level not in {"low", "medium", "high"}:
+            raise ValueError(f"工具 {name} 的 risk_level 非法: {risk_level}")
+        levels[name] = risk_level
+    return levels
 
 
 def _enforce_tool_risk(tool_name: str) -> None:
@@ -759,6 +756,7 @@ def _build_openai_tools(tool_specs: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
 
 _TOOL_SPECS = _load_tool_registry_config()
+TOOL_RISK_LEVELS = _build_tool_risk_levels(_TOOL_SPECS)
 TOOL_REGISTRY = _build_tool_registry(_TOOL_SPECS)
 OPENAI_TOOLS: List[Dict[str, Any]] = _build_openai_tools(_TOOL_SPECS)
 
