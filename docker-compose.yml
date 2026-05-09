@@ -1,0 +1,17 @@
+version: '3.9'
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: simple-workflow-backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: simple-workflow-frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"

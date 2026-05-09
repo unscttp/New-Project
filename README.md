@@ -50,3 +50,20 @@ This repository hosts a lightweight AI Agent MVP with a web chat interface, a Fa
 - Tool module filenames should mirror the primary function name they implement.
 - Avoid catch-all names like `skills.py`, `helpers.py`, or `misc.py` for tool modules.
 - Any tool module rename must include corresponding import updates in `backend/tools/__init__.py` and documentation updates in `backend/tools/TOOLS.md`.
+
+
+## 8. Docker deployment
+- Default ports are aligned via `docker-compose.yml`:
+  - Frontend: `3000` (configurable with `FRONTEND_PORT`)
+  - Backend: `8000` (configurable with `BACKEND_PORT`)
+- Start containers:
+  ```bash
+  docker compose up --build
+  ```
+- Open frontend: `http://localhost:${FRONTEND_PORT:-3000}`.
+
+
+## 9. Local run default ports
+- Backend default: `http://localhost:8000`
+- Frontend default: `http://localhost:3000`
+- Frontend fallback API target (when `NEXT_PUBLIC_API_BASE_URL` is unset): `http://localhost:8000`
