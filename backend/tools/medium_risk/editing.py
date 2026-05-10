@@ -1,6 +1,3 @@
-from typing import Callable
-
-
 from pydantic import BaseModel, Field
 
 
@@ -14,17 +11,14 @@ def edit_report_file(
     allowed_folder: str,
     filename: str,
     content: str,
-    *,
-    resolve_scoped_path: Callable[[str, str], object],
-    scoped_path_denied_text: str,
-    sha256_text: Callable[[str], str],
-    record_audit_event: Callable[..., None],
 ) -> str:
+    from ..shared.pathing import resolve_scoped_path, SCOPED_PATH_DENIED_TEXT
+    from ..shared.audit import record_audit_event, sha256_text
     target_path = resolve_scoped_path(allowed_folder, filename)
     if not target_path.exists():
         raise FileNotFoundError(f"文件不存在：{target_path.name}")
     if not target_path.is_file():
-        raise PermissionError(scoped_path_denied_text)
+        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
 
     before_text = target_path.read_text(encoding="utf-8")
     before_hash = sha256_text(before_text)

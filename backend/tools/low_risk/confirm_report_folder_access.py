@@ -1,8 +1,14 @@
 import json
-from typing import Any, Callable, Dict
-
 
 from pydantic import BaseModel, Field
+
+from ..shared.audit import (
+    ACTIVE_SESSION_ID,
+    ERROR_CATEGORY_PERMISSION_DENIED,
+    SESSION_PERMISSION_STATE,
+    record_audit_event,
+)
+from ..shared.pathing import UNAUTHORIZED_FILE_ACCESS_TEXT
 
 
 class ConfirmReportFolderAccessArgs(BaseModel):
@@ -10,49 +16,10 @@ class ConfirmReportFolderAccessArgs(BaseModel):
     folder: str = Field(..., description="用户确认授权的目录绝对路径。")
 
 
-def confirm_report_folder_access(
-    granted: bool,
-    folder: str,
-    *,
-    session_permission_state: Dict[str, Dict[str, Any]],
-    active_session_id: str,
-    record_audit_event: Callable[..., None],
-    unauthorized_file_access_text: str,
-    error_category_permission_denied: str,
-) -> str:
+def confirm_report_folder_access(granted: bool, folder: str) -> str:
     folder_text = folder.strip()
     if not folder_text:
         raise ValueError("folder 不能为空。")
-
-    session_permission_state[active_session_id] = {
-        "file_access_granted": bool(granted),
-        "allowed_report_folder": folder_text if granted else None,
-    }
-    record_audit_event(
-        operation="confirm_report_folder_access",
-        allowed_folder=folder_text,
-        authorization_state="authorized" if granted else "unauthorized",
-        decision="allow" if granted else "deny",
-        error_category=None if granted else error_category_permission_denied,
-    )
-    if granted:
-        return json.dumps(
-            {
-                "status": "granted",
-                "file_access_granted": True,
-                "allowed_report_folder": folder_text,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    return json.dumps(
-        {
-            "status": "denied",
-            "file_access_granted": False,
-            "allowed_report_folder": None,
-            "message": unauthorized_file_access_text,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
+    SESSION_PERMISSION_STATE[ACTIVE_SESSION_ID] = {"file_access_granted": bool(granted), "allowed_report_folder": folder_text if granted else None}
+    record_audit_event("confirm_report_folder_access", folder_text, "authorized" if granted else "unauthorized", "allow" if granted else "deny", error_category=None if granted else ERROR_CATEGORY_PERMISSION_DENIED)
+    return json.dumps({"status": "granted" if granted else "denied", "file_access_granted": bool(granted), "allowed_report_folder": folder_text if granted else None, "message": None if granted else UNAUTHORIZED_FILE_ACCESS_TEXT}, ensure_ascii=False, indent=2)

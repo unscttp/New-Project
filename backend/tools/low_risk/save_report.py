@@ -1,7 +1,9 @@
-from typing import Callable, Literal, Optional
-
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+
+from ..shared.pathing import resolve_report_output_path
+from ..shared.report_writers import write_docx_report, write_pdf_report
 
 
 class SaveReportArgs(BaseModel):
@@ -12,34 +14,17 @@ class SaveReportArgs(BaseModel):
     filename: Optional[str] = Field(default=None, description="可选文件名（可不含后缀）。为空时自动生成日期+标题文件名。")
 
 
-def save_report(
-    title: str,
-    content: str,
-    format: Literal["md", "docx", "pdf"],
-    folder: str,
-    filename: Optional[str] = None,
-    *,
-    resolve_report_output_path: Callable[[str, str, str, Optional[str]], object],
-    write_docx_report: Callable[[object, str, str], None],
-    write_pdf_report: Callable[[object, str, str], None],
-) -> str:
+def save_report(title: str, content: str, format: Literal["md", "docx", "pdf"], folder: str, filename: Optional[str] = None) -> str:
     title_text = title.strip()
-    if not title_text:
-        raise ValueError("title 不能为空。")
-
     content_text = content.strip()
-    if not content_text:
-        raise ValueError("content 不能为空。")
+    if not title_text or not content_text:
+        raise ValueError("title/content 不能为空。")
 
     target_path = resolve_report_output_path(folder, title_text, format, filename)
     if format == "md":
-        markdown = f"# {title_text}\n\n{content_text}\n"
-        target_path.write_text(markdown, encoding="utf-8")
+        target_path.write_text(f"# {title_text}\n\n{content_text}\n", encoding="utf-8")
     elif format == "docx":
         write_docx_report(target_path, title_text, content_text)
-    elif format == "pdf":
-        write_pdf_report(target_path, title_text, content_text)
     else:
-        raise ValueError("不支持的 format，必须是 md/docx/pdf。")
-
+        write_pdf_report(target_path, title_text, content_text)
     return f"报告已导出：{target_path}"
