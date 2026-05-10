@@ -1,5 +1,5 @@
 import json
-from typing import Callable, Literal
+from typing import Literal
 
 from docx import Document
 
@@ -19,22 +19,15 @@ def edit_report(
     folder: str,
     instruction: str,
     mode: Literal["append", "replace_section", "rewrite"],
-    *,
-    resolve_scoped_path: Callable[[str, str], object],
-    scoped_path_denied_text: str,
-    ensure_supported_edit_extension: Callable[[object], str],
-    make_backup: Callable[[object], object],
-    sha256_text: Callable[[str], str],
-    sha256_bytes: Callable[[bytes], str],
-    edit_markdown_content: Callable[[str, str, str], tuple[str, list[str], int]],
-    parse_replace_instruction: Callable[[str], tuple[str, str]],
-    record_audit_event: Callable[..., None],
 ) -> str:
+    from ..shared.pathing import resolve_scoped_path, SCOPED_PATH_DENIED_TEXT, ensure_supported_edit_extension, make_backup
+    from ..shared.audit import record_audit_event, sha256_text, sha256_bytes
+    from ..shared.text_editing import edit_markdown_content, parse_replace_instruction
     target_path = resolve_scoped_path(folder, file_name)
     if not target_path.exists():
         raise FileNotFoundError(f"文件不存在：{target_path.name}")
     if not target_path.is_file():
-        raise PermissionError(scoped_path_denied_text)
+        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
 
     ext = ensure_supported_edit_extension(target_path)
     backup_path = make_backup(target_path)

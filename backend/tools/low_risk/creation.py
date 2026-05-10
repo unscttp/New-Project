@@ -1,7 +1,9 @@
-from typing import Callable, Optional
-
+from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from ..shared.audit import record_audit_event, sha256_text
+from ..shared.pathing import resolve_scoped_path
 
 
 class SaveReportFileArgs(BaseModel):
@@ -10,27 +12,9 @@ class SaveReportFileArgs(BaseModel):
     content: str = Field(..., description="要写入文件的文本内容。")
 
 
-def save_report_file(
-    allowed_folder: str,
-    filename: str,
-    content: str,
-    *,
-    resolve_scoped_path: Callable[[str, str], object],
-    sha256_text: Callable[[str], str],
-    record_audit_event: Callable[..., None],
-) -> str:
+def save_report_file(allowed_folder: str, filename: str, content: str) -> str:
     target_path = resolve_scoped_path(allowed_folder, filename)
-    before_hash: Optional[str] = (
-        sha256_text(target_path.read_text(encoding="utf-8")) if target_path.exists() else None
-    )
+    before_hash: Optional[str] = sha256_text(target_path.read_text(encoding="utf-8")) if target_path.exists() else None
     target_path.write_text(content, encoding="utf-8")
-    after_hash = sha256_text(content)
-    record_audit_event(
-        operation="save_report_file",
-        target_file=target_path.name,
-        allowed_folder=str(target_path.parent),
-        authorization_state="authorized",
-        decision="allow",
-        details={"checksum_before": before_hash, "checksum_after": after_hash},
-    )
+    record_audit_event("save_report_file", str(target_path.parent), "authorized", "allow", target_file=target_path.name, details={"checksum_before": before_hash, "checksum_after": sha256_text(content)})
     return f"文件已保存：{target_path}"
