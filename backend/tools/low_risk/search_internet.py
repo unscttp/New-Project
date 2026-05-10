@@ -3,6 +3,13 @@ from typing import List
 from duckduckgo_search import DDGS
 
 
+from pydantic import BaseModel, Field
+
+
+class SearchInternetArgs(BaseModel):
+    query: str = Field(..., description="要搜索的互联网关键词或问题。")
+
+
 def search_internet(query: str) -> str:
     """使用 DuckDuckGo 执行轻量搜索并返回文本摘要。"""
     query = query.strip()

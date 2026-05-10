@@ -2,6 +2,14 @@ import json
 from typing import Any, Callable, Dict
 
 
+from pydantic import BaseModel, Field
+
+
+class ConfirmReportFolderAccessArgs(BaseModel):
+    granted: bool = Field(..., description="用户是否同意授权。")
+    folder: str = Field(..., description="用户确认授权的目录绝对路径。")
+
+
 def confirm_report_folder_access(
     granted: bool,
     folder: str,

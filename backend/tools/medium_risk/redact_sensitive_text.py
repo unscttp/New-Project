@@ -1,6 +1,13 @@
 import re
 
 
+from pydantic import BaseModel, Field
+
+
+class RedactSensitiveTextArgs(BaseModel):
+    content: str = Field(..., description="需要脱敏处理的文本内容。")
+
+
 def redact_sensitive_text(content: str) -> str:
     """对常见邮箱和手机号做脱敏处理。"""
     text = (content or "").strip()

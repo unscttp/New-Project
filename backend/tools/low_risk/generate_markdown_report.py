@@ -2,6 +2,14 @@ from pathlib import Path
 from typing import Callable, Dict
 
 
+from pydantic import BaseModel, Field
+
+
+class GenerateMarkdownReportArgs(BaseModel):
+    title: str = Field(..., description="Markdown 报告标题。")
+    content: str = Field(..., description="Markdown 报告正文内容。")
+
+
 def generate_markdown_report(
     title: str,
     content: str,

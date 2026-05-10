@@ -1,6 +1,14 @@
 import json
 
 
+from pydantic import BaseModel, Field
+
+
+class RequestReportFolderAccessArgs(BaseModel):
+    purpose: str = Field(..., description="申请访问该目录的用途说明。")
+    folder: str = Field(..., description="希望访问并保存报告的目录绝对路径。")
+
+
 def request_report_folder_access(purpose: str, folder: str) -> str:
     purpose_text = purpose.strip()
     folder_text = folder.strip()
