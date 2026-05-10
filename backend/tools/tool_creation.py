@@ -24,6 +24,13 @@ def save_registry(payload: dict) -> None:
     REGISTRY_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+
+
+def _ensure_direct_module_path(import_path: str, *, field_name: str) -> None:
+    module_path, _, _ = import_path.partition(":")
+    if module_path == "backend.tools":
+        raise ToolSecurityError(f"{field_name} must point to a concrete tool module, not backend.tools:*")
+
 def _load_callable(callable_path: str):
     module_path, _, attr_name = callable_path.partition(":")
     if not module_path or not attr_name:
@@ -91,6 +98,8 @@ def _enforce_tool_security(callable_path: str, risk_level: str) -> str:
 
 
 def upsert_tool(name: str, risk_level: str, callable_path: str, args_model_path: str, description: str) -> None:
+    _ensure_direct_module_path(callable_path, field_name="callable_path")
+    _ensure_direct_module_path(args_model_path, field_name="args_model_path")
     payload = load_registry()
     tools = payload.setdefault("tools", [])
     secured_risk_level = _enforce_tool_security(callable_path, risk_level)

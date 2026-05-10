@@ -1,6 +1,15 @@
 from typing import Callable, Optional
 
 
+from pydantic import BaseModel, Field
+
+
+class SaveReportFileArgs(BaseModel):
+    allowed_folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+    filename: str = Field(..., description="仅文件名，例如 summary.md。")
+    content: str = Field(..., description="要写入文件的文本内容。")
+
+
 def save_report_file(
     allowed_folder: str,
     filename: str,

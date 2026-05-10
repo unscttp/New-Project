@@ -4,6 +4,13 @@ from typing import Any, Callable, List
 import pandas as pd
 
 
+from pydantic import BaseModel, Field
+
+
+class AnalyzeTrendDataArgs(BaseModel):
+    data_json: str = Field(..., description="JSON 字符串，支持数字数组或包含数值字段的对象数组。")
+
+
 def analyze_trend_data(data_json: str, *, extract_numeric_values: Callable[[Any], List[float]]) -> str:
     """对 JSON 中的数值做基础统计。"""
     try:

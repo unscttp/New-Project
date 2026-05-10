@@ -5,113 +5,113 @@
       "name": "search_internet",
       "risk_level": "low",
       "description": "搜索互联网公开信息，返回轻量级文本摘要列表。",
-      "callable_path": "backend.tools:search_internet",
-      "args_model_path": "backend.tools:SearchInternetArgs"
+      "callable_path": "backend.tools.low_risk.search_internet:search_internet",
+      "args_model_path": "backend.tools.low_risk.search_internet:SearchInternetArgs"
     },
     {
       "name": "analyze_trend_data",
       "risk_level": "low",
       "description": "对 JSON 数值数据做基础统计分析，返回均值、最大值、最小值等结果。",
-      "callable_path": "backend.tools:analyze_trend_data",
-      "args_model_path": "backend.tools:AnalyzeTrendDataArgs"
+      "callable_path": "backend.tools.low_risk.analyze_trend_data:analyze_trend_data",
+      "args_model_path": "backend.tools.low_risk.analyze_trend_data:AnalyzeTrendDataArgs"
     },
     {
       "name": "request_report_folder_access",
       "risk_level": "low",
       "description": "申请访问报告目录，仅记录授权意图并返回确认提示，不执行任何文件写入。",
-      "callable_path": "backend.tools:request_report_folder_access",
-      "args_model_path": "backend.tools:RequestReportFolderAccessArgs"
+      "callable_path": "backend.tools.low_risk.request_report_folder_access:request_report_folder_access",
+      "args_model_path": "backend.tools.low_risk.request_report_folder_access:RequestReportFolderAccessArgs"
     },
     {
       "name": "confirm_report_folder_access",
       "risk_level": "low",
       "description": "记录用户对报告目录访问授权的确认结果，持久化到当前会话状态。",
-      "callable_path": "backend.tools:confirm_report_folder_access",
-      "args_model_path": "backend.tools:ConfirmReportFolderAccessArgs"
+      "callable_path": "backend.tools.low_risk.confirm_report_folder_access:confirm_report_folder_access",
+      "args_model_path": "backend.tools.low_risk.confirm_report_folder_access:ConfirmReportFolderAccessArgs"
     },
     {
       "name": "generate_markdown_report",
       "risk_level": "low",
       "description": "把给定标题和内容保存为 Markdown 报告到已授权目录。",
-      "callable_path": "backend.tools:generate_markdown_report",
-      "args_model_path": "backend.tools:GenerateMarkdownReportArgs"
+      "callable_path": "backend.tools.low_risk.generate_markdown_report:generate_markdown_report",
+      "args_model_path": "backend.tools.low_risk.generate_markdown_report:GenerateMarkdownReportArgs"
     },
     {
       "name": "save_report",
       "risk_level": "low",
       "description": "在已授权目录导出报告为 md/docx/pdf；调用前必须完成 request_report_folder_access + confirm_report_folder_access，并将 folder 设为已授权目录。",
-      "callable_path": "backend.tools:save_report",
-      "args_model_path": "backend.tools:SaveReportArgs"
+      "callable_path": "backend.tools.low_risk.save_report:save_report",
+      "args_model_path": "backend.tools.low_risk.save_report:SaveReportArgs"
     },
     {
       "name": "save_report_file",
       "risk_level": "low",
       "description": "在授权目录内按文件名保存报告内容，拒绝任意路径输入。",
-      "callable_path": "backend.tools:save_report_file",
-      "args_model_path": "backend.tools:SaveReportFileArgs"
+      "callable_path": "backend.tools.low_risk.creation:save_report_file",
+      "args_model_path": "backend.tools.low_risk.creation:SaveReportFileArgs"
     },
     {
       "name": "read_report_file",
       "risk_level": "low",
       "description": "在授权目录内按文件名读取报告内容，拒绝任意路径输入。",
-      "callable_path": "backend.tools:read_report_file",
-      "args_model_path": "backend.tools:ReadReportFileArgs"
+      "callable_path": "backend.tools.low_risk.read_report_file:read_report_file",
+      "args_model_path": "backend.tools.low_risk.read_report_file:ReadReportFileArgs"
     },
     {
       "name": "edit_report_file",
       "risk_level": "medium",
       "description": "在授权目录内按文件名覆盖编辑报告内容，拒绝任意路径输入。",
-      "callable_path": "backend.tools:edit_report_file",
-      "args_model_path": "backend.tools:EditReportFileArgs"
+      "callable_path": "backend.tools.medium_risk.editing:edit_report_file",
+      "args_model_path": "backend.tools.medium_risk.editing:EditReportFileArgs"
     },
     {
       "name": "read_report",
       "risk_level": "medium",
       "description": "读取授权目录中的 .md/.docx 报告内容（MVP 不支持 PDF 正文读取）。",
-      "callable_path": "backend.tools:read_report",
-      "args_model_path": "backend.tools:ReadReportArgs"
+      "callable_path": "backend.tools.medium_risk.read_report:read_report",
+      "args_model_path": "backend.tools.medium_risk.read_report:ReadReportArgs"
     },
     {
       "name": "edit_report",
       "risk_level": "medium",
       "description": "编辑授权目录中的 .md/.docx 报告，支持 append/replace_section/rewrite，并自动创建同目录备份。",
-      "callable_path": "backend.tools:edit_report",
-      "args_model_path": "backend.tools:EditReportArgs"
+      "callable_path": "backend.tools.medium_risk.edit_report:edit_report",
+      "args_model_path": "backend.tools.medium_risk.edit_report:EditReportArgs"
     },
     {
       "name": "list_report_files",
       "risk_level": "low",
       "description": "仅列出授权目录内 .md/.docx/.pdf 文件名。",
-      "callable_path": "backend.tools:list_report_files",
-      "args_model_path": "backend.tools:ListReportFilesArgs"
+      "callable_path": "backend.tools.low_risk.list_report_files:list_report_files",
+      "args_model_path": "backend.tools.low_risk.list_report_files:ListReportFilesArgs"
     },
     {
       "name": "select_tool_risk_level",
       "risk_level": "low",
       "description": "设置当前会话的工具风险级别（low/medium/high），用于限制可调用工具范围。",
-      "callable_path": "backend.tools:select_tool_risk_level",
-      "args_model_path": "backend.tools:SelectToolRiskLevelArgs"
+      "callable_path": "backend.tools.low_risk.select_tool_risk_level:select_tool_risk_level",
+      "args_model_path": "backend.tools.low_risk.select_tool_risk_level:SelectToolRiskLevelArgs"
     },
     {
       "name": "extract_keywords",
       "risk_level": "low",
       "description": "从输入文本中提取高频关键词，适合快速提炼主题词。",
-      "callable_path": "backend.tools:extract_keywords",
-      "args_model_path": "backend.tools:ExtractKeywordsArgs"
+      "callable_path": "backend.tools.low_risk.extract_keywords:extract_keywords",
+      "args_model_path": "backend.tools.low_risk.extract_keywords:ExtractKeywordsArgs"
     },
     {
       "name": "redact_sensitive_text",
       "risk_level": "medium",
       "description": "对文本中的邮箱和手机号进行脱敏处理。",
-      "callable_path": "backend.tools:redact_sensitive_text",
-      "args_model_path": "backend.tools:RedactSensitiveTextArgs"
+      "callable_path": "backend.tools.medium_risk.redact_sensitive_text:redact_sensitive_text",
+      "args_model_path": "backend.tools.medium_risk.redact_sensitive_text:RedactSensitiveTextArgs"
     },
     {
       "name": "delete_report_file",
       "risk_level": "high",
       "description": "删除授权目录中的文件（高风险操作）。",
-      "callable_path": "backend.tools:delete_report_file",
-      "args_model_path": "backend.tools:DeleteReportFileArgs"
+      "callable_path": "backend.tools.high_risk.delete_report_file:delete_report_file",
+      "args_model_path": "backend.tools.high_risk.delete_report_file:DeleteReportFileArgs"
     }
   ]
 }

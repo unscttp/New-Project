@@ -1,6 +1,17 @@
 from typing import Callable, Literal, Optional
 
 
+from pydantic import BaseModel, Field
+
+
+class SaveReportArgs(BaseModel):
+    title: str = Field(..., description="报告标题。")
+    content: str = Field(..., description="报告正文，可为 markdown 或纯文本。")
+    format: Literal["md", "docx", "pdf"] = Field(..., description="导出格式：md、docx、pdf。")
+    folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+    filename: Optional[str] = Field(default=None, description="可选文件名（可不含后缀）。为空时自动生成日期+标题文件名。")
+
+
 def save_report(
     title: str,
     content: str,

@@ -4,6 +4,16 @@ from typing import Callable, Literal
 from docx import Document
 
 
+from pydantic import BaseModel, Field
+
+
+class EditReportArgs(BaseModel):
+    file_name: str = Field(..., description="仅文件名，例如 summary.md。")
+    folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+    instruction: str = Field(..., description="编辑指令文本。replace_section 模式建议使用“section: 节标题\n---\n新内容”。")
+    mode: Literal["append", "replace_section", "rewrite"] = Field(..., description="编辑模式：append、replace_section、rewrite。")
+
+
 def edit_report(
     file_name: str,
     folder: str,

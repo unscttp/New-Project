@@ -2,6 +2,14 @@ import json
 from collections import Counter
 
 
+from pydantic import BaseModel, Field
+
+
+class ExtractKeywordsArgs(BaseModel):
+    text: str = Field(..., description="要提取关键词的文本内容。")
+    top_k: int = Field(default=8, description="返回关键词个数，默认 8。")
+
+
 def extract_keywords(text: str, top_k: int = 8) -> str:
     """提取文本中的高频关键词（按空格分词的轻量版本）。"""
     cleaned = (text or "").strip().lower()

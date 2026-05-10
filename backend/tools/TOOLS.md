@@ -10,7 +10,7 @@ Define the backend tool catalog, risk model, and maintenance rules for tool gove
 
 ## 3. Inputs/Outputs (Interfaces)
 ### Source of truth
-Tool names documented here **must exactly match** `backend/tools/tool_registry.json` entries. Runtime `TOOL_REGISTRY` in `backend/tools/__init__.py` is generated from that JSON; update this document in the same change.
+Tool names documented here **must exactly match** `backend/tools/tool_registry.json` entries. Runtime `TOOL_REGISTRY` in `backend/tools/__init__.py` is generated from that JSON; update this document in the same change. `callable_path` and `args_model_path` must reference concrete module-local symbols under `backend.tools.{low_risk|medium_risk|high_risk}` (not `backend.tools:*`).
 
 ### Risk-level policy
 - `low`: can use only Low risk tools.
@@ -50,7 +50,7 @@ Tool names documented here **must exactly match** `backend/tools/tool_registry.j
 - Avoid introducing undocumented tools; add both implementation and docs in the same change.
 
 ## 5. Examples
-- **Adding a tool**: implement tool, then run `python backend/tools/tool_creation.py ...` to update `tool_registry.json`, and append row in the Tools table.
+- **Adding a tool (zero-touch)**: create a module in the correct risk folder, define both the callable and its Pydantic args model in that module (or local `schemas.py`), register both direct import paths in `tool_registry.json` (or via `tool_creation.py`), and append row in the Tools table. No `backend/tools/__init__.py` edits are required for normal tool additions.
 - **Renaming a tool**: update callable name + JSON entry, then update all prompt/tool references and this document.
 - **Risk escalation**: if tool gains write/delete behavior, re-evaluate and potentially move from `low` to `medium`/`high`.
 

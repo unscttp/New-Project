@@ -4,6 +4,14 @@ from typing import Callable
 from docx import Document
 
 
+from pydantic import BaseModel, Field
+
+
+class ReadReportArgs(BaseModel):
+    file_name: str = Field(..., description="仅文件名，例如 summary.md。")
+    folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+
+
 def read_report(
     file_name: str,
     folder: str,

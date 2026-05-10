@@ -1,6 +1,14 @@
 from typing import Callable
 
 
+from pydantic import BaseModel, Field
+
+
+class ReadReportFileArgs(BaseModel):
+    allowed_folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
+    filename: str = Field(..., description="仅文件名，例如 summary.md。")
+
+
 def read_report_file(
     allowed_folder: str,
     filename: str,
