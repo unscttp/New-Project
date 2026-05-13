@@ -56,5 +56,5 @@ Tool names documented here **must exactly match** `backend/tools/tool_registry.j
 
 ## 6. Change log / maintenance notes
 - Treat this file as a maintained interface spec, not a narrative guide.
-- Reconcile this doc against `backend/tools/__init__.py` during code review.
+- Reconcile this doc against `backend/tools/tool_registry.json` during code review.
 - Keep descriptions concise and behavior-focused so prompts can safely depend on them.

@@ -20,3 +20,16 @@ python backend/tools/tool_creation.py \
 - [ ] Callable import path resolves at runtime (`module.path:function_name`).
 - [ ] Args model exists in `backend/tools/__init__.py`.
 - [ ] Risk classification in `backend/tools/TOOLS.md` matches JSON.
+
+
+## Scaffold a brand-new tool module
+```bash
+python backend/tools/tool_creation.py \
+  --name "your_tool_name" \
+  --risk-level "low" \
+  --module-path "backend.tools.low_risk.your_module" \
+  --function-name "your_tool" \
+  --args-model-name "YourToolArgs" \
+  --description "User-facing tool description"
+```
+This creates a new Python module from scratch, then auto-registers it in `tool_registry.json`.
