@@ -65,9 +65,7 @@ def _is_file_modification_call(node: ast.Call) -> bool:
     return False
 
 
-def _enforce_tool_security(callable_path: str, risk_level: str) -> str:
-    callable_obj = _load_callable(callable_path)
-    tree = _get_callable_ast(callable_obj)
+def _enforce_tree_security(tree: ast.AST, risk_level: str) -> str:
     modifies_files = False
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and _is_os_function(node):
@@ -75,6 +73,12 @@ def _enforce_tool_security(callable_path: str, risk_level: str) -> str:
         if isinstance(node, ast.Call) and _is_file_modification_call(node):
             modifies_files = True
     return "high" if modifies_files else risk_level
+
+
+def _enforce_tool_security(callable_path: str, risk_level: str) -> str:
+    callable_obj = _load_callable(callable_path)
+    tree = _get_callable_ast(callable_obj)
+    return _enforce_tree_security(tree, risk_level)
 
 
 def upsert_tool(name: str, risk_level: str, callable_path: str, args_model_path: str, description: str) -> None:
@@ -99,7 +103,7 @@ def upsert_tool(name: str, risk_level: str, callable_path: str, args_model_path:
     save_registry(payload)
 
 
-def scaffold_tool(module_path: str, function_name: str, args_model_name: str, description: str) -> tuple[str, str]:
+def scaffold_tool(module_path: str, function_name: str, args_model_name: str, description: str, code: str | None = None) -> tuple[str, str]:
     if not module_path.startswith("backend.tools."):
         raise ToolSecurityError("module_path must start with backend.tools.")
     if module_path == "backend.tools":
@@ -110,7 +114,7 @@ def scaffold_tool(module_path: str, function_name: str, args_model_name: str, de
     if file_path.exists():
         raise ToolSecurityError(f"Refusing to overwrite existing module: {file_path}")
 
-    code = dedent(
+    scaffolded_code = code or dedent(
         f'''\
         from pydantic import BaseModel, Field
 
@@ -124,7 +128,12 @@ def scaffold_tool(module_path: str, function_name: str, args_model_name: str, de
             return text
         '''
     )
-    file_path.write_text(code, encoding="utf-8")
+    try:
+        scaffolded_tree = ast.parse(scaffolded_code)
+    except SyntaxError as exc:
+        raise ToolSecurityError(f"Invalid --code content: {exc}") from exc
+    _enforce_tree_security(scaffolded_tree, "low")
+    file_path.write_text(scaffolded_code, encoding="utf-8")
     callable_path = f"{module_path}:{function_name}"
     args_path = f"{module_path}:{args_model_name}"
     return callable_path, args_path
@@ -140,6 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--module-path", help="Scaffold mode: module path like backend.tools.low_risk.my_tool")
     parser.add_argument("--function-name", help="Scaffold mode: function name")
     parser.add_argument("--args-model-name", help="Scaffold mode: args model class name")
+    parser.add_argument("--code", help="Scaffold mode: full Python source code for the module. If omitted, a template is used.")
     return parser
 
 
@@ -152,7 +162,13 @@ def main() -> None:
     if args.module_path:
         if not (args.function_name and args.args_model_name):
             raise ToolSecurityError("Scaffold mode requires --function-name and --args-model-name")
-        callable_path, args_model_path = scaffold_tool(args.module_path, args.function_name, args.args_model_name, args.description)
+        callable_path, args_model_path = scaffold_tool(
+            args.module_path,
+            args.function_name,
+            args.args_model_name,
+            args.description,
+            code=args.code,
+        )
 
     if not callable_path or not args_model_path:
         raise ToolSecurityError("Provide --callable-path/--args-model-path or scaffold arguments.")
