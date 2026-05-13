@@ -11,6 +11,9 @@ from pathlib import Path
 from textwrap import dedent
 
 REGISTRY_PATH = Path(__file__).resolve().parent / "tool_registry.json"
+ALLOWED_RISK_LEVELS = ("low", "medium", "high")
+FILE_MODIFICATION_ESCALATED_RISK_LEVEL = "high"
+ALLOWED_RISK_LEVELS_SET = set(ALLOWED_RISK_LEVELS)
 
 
 class ToolSecurityError(ValueError):
@@ -66,13 +69,16 @@ def _is_file_modification_call(node: ast.Call) -> bool:
 
 
 def _enforce_tree_security(tree: ast.AST, risk_level: str) -> str:
+    if risk_level not in ALLOWED_RISK_LEVELS_SET:
+        raise ToolSecurityError(f"risk_level must be one of: {', '.join(ALLOWED_RISK_LEVELS)}")
+
     modifies_files = False
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and _is_os_function(node):
             raise ToolSecurityError("Tool creation blocked: os.* function usage is not allowed.")
         if isinstance(node, ast.Call) and _is_file_modification_call(node):
             modifies_files = True
-    return "high" if modifies_files else risk_level
+    return FILE_MODIFICATION_ESCALATED_RISK_LEVEL if modifies_files else risk_level
 
 
 def _enforce_tool_security(callable_path: str, risk_level: str) -> str:
@@ -149,7 +155,7 @@ def scaffold_tool(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Create or update tool metadata in tool_registry.json")
     parser.add_argument("--name", required=True)
-    parser.add_argument("--risk-level", required=True, choices=["low", "medium", "high"])
+    parser.add_argument("--risk-level", required=True, choices=ALLOWED_RISK_LEVELS)
     parser.add_argument("--callable-path")
     parser.add_argument("--args-model-path")
     parser.add_argument("--description", required=True)
