@@ -103,7 +103,14 @@ def upsert_tool(name: str, risk_level: str, callable_path: str, args_model_path:
     save_registry(payload)
 
 
-def scaffold_tool(module_path: str, function_name: str, args_model_name: str, description: str, code: str | None = None) -> tuple[str, str]:
+def scaffold_tool(
+    module_path: str,
+    function_name: str,
+    args_model_name: str,
+    description: str,
+    risk_level: str,
+    code: str | None = None,
+) -> tuple[str, str]:
     if not module_path.startswith("backend.tools."):
         raise ToolSecurityError("module_path must start with backend.tools.")
     if module_path == "backend.tools":
@@ -132,7 +139,7 @@ def scaffold_tool(module_path: str, function_name: str, args_model_name: str, de
         scaffolded_tree = ast.parse(scaffolded_code)
     except SyntaxError as exc:
         raise ToolSecurityError(f"Invalid --code content: {exc}") from exc
-    _enforce_tree_security(scaffolded_tree, "low")
+    _enforce_tree_security(scaffolded_tree, risk_level)
     file_path.write_text(scaffolded_code, encoding="utf-8")
     callable_path = f"{module_path}:{function_name}"
     args_path = f"{module_path}:{args_model_name}"
@@ -167,6 +174,7 @@ def main() -> None:
             args.function_name,
             args.args_model_name,
             args.description,
+            args.risk_level,
             code=args.code,
         )
 
