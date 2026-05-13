@@ -30,6 +30,7 @@ python backend/tools/tool_creation.py \
   --module-path "backend.tools.low_risk.your_module" \
   --function-name "your_tool" \
   --args-model-name "YourToolArgs" \
-  --description "User-facing tool description"
+  --description "User-facing tool description" \
+  --code "$(cat /path/to/generated_tool.py)"
 ```
-This creates a new Python module from scratch, then auto-registers it in `tool_registry.json`.
+This creates a new Python module from scratch (or from the provided `--code`), runs AST validation/security checks, then auto-registers it in `tool_registry.json`.
