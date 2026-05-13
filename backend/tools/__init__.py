@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -40,9 +41,21 @@ def _build_tool_registry(specs: List[Dict[str, Any]], risk_levels: Dict[str, str
     for spec in specs:
         name = str(spec["name"])
         callable_obj = _resolve_object(spec["callable_path"])
+        callable_sig = inspect.signature(callable_obj)
+        inject_kwargs: Dict[str, Any] = {}
+        if "set_active_risk_level" in callable_sig.parameters:
+            inject_kwargs["set_active_risk_level"] = set_active_risk_level
 
-        def guarded_callable(*args: Any, __name: str = name, __callable=callable_obj, **kwargs: Any) -> Any:
+        def guarded_callable(
+            *args: Any,
+            __name: str = name,
+            __callable=callable_obj,
+            __inject_kwargs: Dict[str, Any] = inject_kwargs,
+            **kwargs: Any,
+        ) -> Any:
             _enforce_tool_risk(__name, risk_levels)
+            for dep_name, dep_value in __inject_kwargs.items():
+                kwargs.setdefault(dep_name, dep_value)
             return __callable(*args, **kwargs)
 
         registry[name] = guarded_callable
