@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -8,10 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from tools import OPENAI_TOOLS, TOOL_REGISTRY, get_active_audit_entries, get_active_permission_state, set_active_session
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.tools import OPENAI_TOOLS, TOOL_REGISTRY, get_active_audit_entries, get_active_permission_state, set_active_session
 
 
-PROMPT_FILE = Path(__file__).resolve().parent / "prompts" / "system_prompt.md"
+PROMPT_FILE = CURRENT_DIR / "prompts" / "system_prompt.md"
 
 
 def load_system_prompt() -> str:
